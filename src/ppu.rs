@@ -1,3 +1,5 @@
+use std::fmt; //for custom Debug
+
 use mmu::{Mmu, mirroring};
 
 /*
@@ -53,9 +55,9 @@ pub struct Ppu {
     scroll_v: u8,
     scroll_h: u8,
     
-    //FIXME: this is public for debugging purposes
+    //FIXME: these are public for debugging purposes
     pub current_scanline: usize,
-    name_tables: Vec<u8>,
+    pub name_tables: Vec<u8>,
     
     sprite_ram: Vec<u8>,
     sprite_ram_address: usize,
@@ -68,6 +70,20 @@ pub struct Ppu {
     pub fix_scroll_offset_2: bool,
     pub fix_scroll_offset_3: bool,
     pub fix_bg_change: bool            
+}
+
+impl fmt::Debug for Ppu {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "nmi: {0} size: {1} bg: {2:04x} sp: {3:04x} inc: {4} 0_hit: {5} rw: {6:04x}\nline: {7} hilo: {8} scrv: {9} srch: {10} {11}{12}{13}{14}{15}",
+            self.execute_nmi_on_vblank, self.sprite_size, self.background_address, self.sprite_address,
+            self.ppu_address_increment, self.sprite_0_hit, self.vram_rw_addr, self.current_scanline,
+            self.vram_hi_lo_toggle, self.scroll_v, self.scroll_h,
+            if self.monochrome_display {'M'} else {'-'},
+            if self.no_background_clipping {'D'} else {'-'},
+            if self.no_sprite_clipping {'E'} else {'-'},
+            if self.background_visible {'B'} else {'-'},
+            if self.sprites_visible {'S'} else {'-'}) 
+    }
 }
 
 impl Ppu {
@@ -144,7 +160,8 @@ impl Ppu {
         self.monochrome_display = (data & 0x1) == 0x1;
         self.no_background_clipping = (data & 0x2) == 0x2;
         self.no_sprite_clipping = (data & 0x4) == 0x4;
-        self.sprites_visible = (data & 0x8) == 0x8;
+        self.background_visible = (data & 0x8) == 0x8;
+        self.sprites_visible = (data & 0x10) == 0x10;
         self.ppu_color = (data >> 5) as i32;
     }
     
@@ -182,24 +199,18 @@ impl Ppu {
             // FIXME: these workarounds are from original emu
             // Unsure if there are unimplemented
             // parts of the PPU that should be added
-            if self.fix_scroll_offset_1 &&
-                self.current_scanline < 240 {
-                
+            if self.fix_scroll_offset_1 && self.current_scanline < 240 {                
                 self.scroll_h = ((self.scroll_h as i32) - self.current_scanline as i32) as u8;
             }
-            if self.fix_scroll_offset_2 && 
-                self.current_scanline < 240 {
-                
+            if self.fix_scroll_offset_2 && self.current_scanline < 240 {                
                 self.scroll_h = ((self.scroll_h as i32) - (self.current_scanline as i32) + 8) as u8;
             }
-            if self.fix_scroll_offset_3 && 
-                self.current_scanline < 240 {
-                
+            if self.fix_scroll_offset_3 && self.current_scanline < 240 {                
                 self.scroll_h = 238;
             }
-        }
         
-        self.vram_hi_lo_toggle = 1;
+            self.vram_hi_lo_toggle = 1;
+        }
     }
     
     pub fn vram_addr_reg_2_write(&mut self, data: u8) {
@@ -234,7 +245,7 @@ impl Ppu {
                         0x2400 => self.name_tables[self.vram_rw_addr - 0x2400] = data,
                         0x2800 => self.name_tables[self.vram_rw_addr - 0x2400] = data,
                         0x2C00 => self.name_tables[self.vram_rw_addr - 0x2800] = data,
-                        _ => {}
+                        _ => println!("Unknown VRAM write: {0:04x}", self.vram_rw_addr)
                     }
                 },
                 mirroring::VERTICAL => {
@@ -243,7 +254,7 @@ impl Ppu {
                         0x2400 => self.name_tables[self.vram_rw_addr - 0x2000] = data,
                         0x2800 => self.name_tables[self.vram_rw_addr - 0x2800] = data,
                         0x2C00 => self.name_tables[self.vram_rw_addr - 0x2800] = data,
-                        _ => {}
+                        _ => println!("Unknown VRAM write: {0:04x}", self.vram_rw_addr)
                     }
                 },
                 mirroring::ONE_SCREEN => {
@@ -253,7 +264,7 @@ impl Ppu {
                             0x2400 => self.name_tables[self.vram_rw_addr - 0x2400] = data,
                             0x2800 => self.name_tables[self.vram_rw_addr - 0x2800] = data,
                             0x2C00 => self.name_tables[self.vram_rw_addr - 0x2c00] = data,
-                            _ => {}
+                            _ => println!("Unknown VRAM write: {0:04x}", self.vram_rw_addr)
                         }
                     }
                     else if mmu.mirroring_base() == 0x2400 {
@@ -262,7 +273,7 @@ impl Ppu {
                             0x2400 => self.name_tables[self.vram_rw_addr - 0x2000] = data,
                             0x2800 => self.name_tables[self.vram_rw_addr - 0x2400] = data,
                             0x2C00 => self.name_tables[self.vram_rw_addr - 0x2800] = data,
-                            _ => {}
+                            _ => println!("Unknown VRAM write: {0:04x}", self.vram_rw_addr)
                         }
                     }
                 },
@@ -620,15 +631,6 @@ impl Ppu {
                     }
                 }
             }
-            
-            /*
-            if self.current_scanline == 32 {
-                self.sprite_0_hit = true;
-            }
-            else {
-                self.sprite_0_hit = false;
-            }
-            */
             
             if !self.no_background_clipping {
                 for i in 0..8 {

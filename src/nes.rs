@@ -14,7 +14,9 @@ enum DebuggerCommand {
     ToggleShowCpu,
     ToggleShowMem,
     ToggleDebug,
+    ShowPpu,
     PrintAddr(u16, u16),
+    PrintPpuAddr(u16, u16),
     Nop,
     Ppm,
     Quit
@@ -128,6 +130,7 @@ fn prompt(prev_command: DebuggerCommand, info: &String) -> Result<DebuggerComman
                 "quit" | "q" => return Ok(DebuggerCommand::Quit),
                 "cpu" => return Ok(DebuggerCommand::ToggleShowCpu),
                 "mem" => return Ok(DebuggerCommand::ToggleShowMem),
+                "ppu" => return Ok(DebuggerCommand::ShowPpu),
                 "debug" => return Ok(DebuggerCommand::ToggleDebug),
                 "ppm" => return Ok(DebuggerCommand::Ppm),
                 "frame" | "fr" => return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunFrame)),
@@ -170,17 +173,44 @@ fn prompt(prev_command: DebuggerCommand, info: &String) -> Result<DebuggerComman
                             }                            
                         }
                     },
+                "printppu" | "pp" => {
+                        if parts.len() < 2 {
+                            println!("Supply an address to show. Eg: print fffc");
+                        }
+                        else {
+                            let start = parts[1];
+                            match u16::from_str_radix(start, 16) {
+                                Ok(val) => {
+                                    if parts.len() == 3 {
+                                        match u16::from_str_radix(parts[2], 16) {
+                                            Ok(val2) => return Ok(DebuggerCommand::PrintPpuAddr(val, val2)),
+                                            _ => println!("Supply an end address to show. Eg: print fffc fffe")
+                                        }
+                                    }
+                                    else if parts.len() == 2 {
+                                        return Ok(DebuggerCommand::PrintPpuAddr(val, val));                                    
+                                    }
+                                    else {
+                                        println!("Too many arguments to print command");
+                                    }
+                                },
+                                _ => println!("Supply an address to show. Eg: print fffc")
+                            }                            
+                        }
+                    },
                 "help" | "h" => {
                     println!("Commands available:");
-                    println!("  q(uit):   leave debugger");
+                    println!("  q(uit): leave debugger");
                     println!("  cpu: toggle showing cpu contents");
                     println!("  mem: toggle showing mem contents");
                     println!("  debug: toggle cpu verbose debug");
-                    println!("  fr(ame):  run until next video frame");
+                    println!("  ppu: show ppu contents");
+                    println!("  fr(ame): run until next video frame");
                     println!("  br(eak) <addr>: run until pc == addr");
-                    println!("  sl:  run until next scanline");
-                    println!("  n(ext):   run until next instruction");
+                    println!("  sl: run until next scanline");
+                    println!("  n(ext): run until next instruction");
                     println!("  p(rint) <addr> (<end addr>): show memory at addr");
+                    println!("  pp <addr> (<end addr>): show ppu memory at addr");
                     println!("  ppm: save ppm of current video frame to 'screens'");
                 },
                 _ => println!("Use 'help' to see commands")
@@ -198,6 +228,32 @@ fn print_addr(mem: &mut Memory, addr1: u16, addr2: u16) {
         }
         print!("{0:02x} ", mem.mmu.read_u8(&mut mem.ppu, addr1 + idx));
         
+        if (addr1 + idx) == addr2 {
+            break;
+        }
+        
+        idx += 1;
+        
+        if (idx % 16) == 0 {
+            println!("");
+        }
+    }
+    println!("");
+}
+
+fn print_ppu_addr(mem: &mut Memory, addr1: u16, addr2: u16) {
+    let mut idx = 0;
+    
+    loop {
+        if idx % 16 == 0 {
+            print!("{0:04x}: ", addr1 + idx);
+        }
+        if ((addr1 + idx) >= 0x2000) && ((addr1 + idx) < 0x4000) {
+            print!("{0:02x} ", mem.ppu.name_tables[(addr1 as usize) - 0x2000 + (idx as usize)]);
+        }
+        else if (addr1 + idx) < 0x2000 {
+            print!("{0:02x} ", mem.mmu.read_chr_rom((addr1 as usize) + (idx as usize)));
+        }
         if (addr1 + idx) == addr2 {
             break;
         }
@@ -248,9 +304,11 @@ pub fn run_cart(fname: &String) -> Result<(), io::Error> {
             DebuggerCommand::Quit => break,
             DebuggerCommand::Nop => {},
             DebuggerCommand::Ppm => try!(output_ppm(&mem.ppu, frame_count)),
+            DebuggerCommand::ShowPpu => println!("{:?}", mem.ppu),
             DebuggerCommand::ToggleShowCpu => show_cpu = !show_cpu,
             DebuggerCommand::ToggleShowMem => show_mem = !show_mem,
             DebuggerCommand::PrintAddr(addr1, addr2) => print_addr(&mut mem, addr1, addr2),
+            DebuggerCommand::PrintPpuAddr(addr1, addr2) => print_ppu_addr(&mut mem, addr1, addr2),
             DebuggerCommand::ToggleDebug => cpu.is_debugging = !cpu.is_debugging,
             DebuggerCommand::RunCpuUntil(cond) => {
                 cond_met = false;

@@ -39,10 +39,10 @@ impl Cart {
                 mirroring::FOUR_SCREEN
             } 
             else if (cart_info & 0x1) == 0x1 { 
-                mirroring::HORIZONTAL 
+                mirroring::VERTICAL 
             } 
             else { 
-                mirroring::VERTICAL 
+                mirroring::HORIZONTAL 
             };
         let save_ram_present = (cart_info & 0x2) == 0x2;
         let trainer_present = (cart_info & 0x4) == 0x4;

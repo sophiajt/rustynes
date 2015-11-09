@@ -179,7 +179,7 @@ impl Cpu {
         mem.mmu.write_u8(&mut mem.ppu, new_addr, data);
     }
     
-    fn push_u8(&mut self, mem: &mut Memory,data: u8) {
+    fn push_u8(&mut self, mem: &mut Memory, data: u8) {
         mem.mmu.write_u8(&mut mem.ppu, 0x100 + self.sp as u16, data);
         if self.sp == 0 {
             self.sp = 0xff;
