@@ -1086,7 +1086,7 @@ impl Cpu {
                 _ => {println!("Unknown opcode"); 0}
             };
         let total : i16 = self.a as i16 - value as i16 - 
-            if self.carry {1} else {0};
+            if self.carry {0} else {1};
         
         self.carry = total >= 0;
         self.overflow = total < 0;
