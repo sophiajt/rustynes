@@ -11,7 +11,8 @@ use mmu::Mmu;
 #[derive(Clone)]
 enum DebuggerCommand {
     RunCpuUntil(BreakCondition),
-    ShowCpu,
+    ToggleShowCpu,
+    ShowMem(u16, u16),
     ToggleDebug,
     Nop,
     Ppm,
@@ -107,9 +108,9 @@ pub fn output_ppm(ppu: &Ppu, frame: usize) -> Result<(), io::Error> {
     Ok(())
 }
 
-fn prompt(prev_command: DebuggerCommand) -> Result<DebuggerCommand, io::Error> {
+fn prompt(prev_command: DebuggerCommand, info: &String) -> Result<DebuggerCommand, io::Error> {
     loop {
-        print!("> ");
+        print!("{}> ", info);
         try!(io::stdout().flush());
         
         let mut buffer = String::new();
@@ -124,12 +125,12 @@ fn prompt(prev_command: DebuggerCommand) -> Result<DebuggerCommand, io::Error> {
             
             match parts[0] {
                 "quit" | "q" => return Ok(DebuggerCommand::Quit),
-                "cpu" => return Ok(DebuggerCommand::ShowCpu),
+                "cpu" => return Ok(DebuggerCommand::ToggleShowCpu),
                 "debug" => return Ok(DebuggerCommand::ToggleDebug),
                 "ppm" => return Ok(DebuggerCommand::Ppm),
-                "fr" => return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunFrame)),
+                "frame" | "fr" => return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunFrame)),
                 "sl" => return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunToScanline)),
-                "n" => return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunNext)),
+                "next" | "n" => return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunNext)),
                 "break" | "br" => {
                         if parts.len() < 2 {
                             println!("Supply a PC to break on. Eg: break fffc");
@@ -142,15 +143,41 @@ fn prompt(prev_command: DebuggerCommand) -> Result<DebuggerCommand, io::Error> {
                             }
                         }
                     },
+                "print" | "p" => {
+                        if parts.len() < 2 {
+                            println!("Supply an address to show. Eg: print fffc");
+                        }
+                        else {
+                            let start = parts[1];
+                            match u16::from_str_radix(start, 16) {
+                                Ok(val) => {
+                                    if parts.len() == 3 {
+                                        match u16::from_str_radix(parts[2], 16) {
+                                            Ok(val2) => return Ok(DebuggerCommand::ShowMem(val, val2)),
+                                            _ => println!("Supply an end address to show. Eg: print fffc fffe")
+                                        }
+                                    }
+                                    else if parts.len() == 2 {
+                                        return Ok(DebuggerCommand::ShowMem(val, val));                                    
+                                    }
+                                    else {
+                                        println!("Too many arguments to print command");
+                                    }
+                                },
+                                _ => println!("Supply an address to show. Eg: print fffc")
+                            }                            
+                        }
+                    },
                 "help" => {
                     println!("Commands available:");
                     println!("  q:   leave debugger");
-                    println!("  cpu: print cpu contents");
+                    println!("  cpu: toggle showing cpu contents");
                     println!("  debug: toggle cpu verbose debug");
-                    println!("  fr:  run until next video frame");
-                    println!("  br <addr>: run until pc == addr");
+                    println!("  fr(ame):  run until next video frame");
+                    println!("  br(eak) <addr>: run until pc == addr");
                     println!("  sl:  run until next scanline");
-                    println!("  n:   run until next instruction");
+                    println!("  n(ext):   run until next instruction");
+                    println!("  p(rint) <addr> (<end addr>): show memory at addr");
                     println!("  ppm: save ppm of current video frame to 'screens'");
                 },
                 _ => println!("Use 'help' to see commands")
@@ -163,6 +190,8 @@ pub fn run_cart(fname: &String) -> Result<(), io::Error> {
     let cart = try!(Cart::load_cart(fname));
     let mut cpu = Cpu::new();
     let mut frame_count = 0;
+    let mut debug_info : String;
+    let mut show_cpu = true;
     let mut prev_command = DebuggerCommand::Nop;
 
     //Create all our memory handlers, and hand off ownership
@@ -173,16 +202,41 @@ pub fn run_cart(fname: &String) -> Result<(), io::Error> {
     
     let mut cond_met;
     loop {
-        if cpu.is_debugging {
-            print!("[{:?}] ", cpu);
+        if show_cpu {
+            cpu.fetch(&mut mem);
+            debug_info = format!("[{:?}]", cpu);
         }
-        let command = try!(prompt(prev_command));
+        else {
+            debug_info = String::new();
+        }
+        let command = try!(prompt(prev_command, &debug_info));
         prev_command = command.clone();
         match command {
             DebuggerCommand::Quit => break,
             DebuggerCommand::Nop => {},
             DebuggerCommand::Ppm => try!(output_ppm(&mem.ppu, frame_count)),
-            DebuggerCommand::ShowCpu => println!("{:?}", cpu),
+            DebuggerCommand::ToggleShowCpu => show_cpu = !show_cpu,
+            DebuggerCommand::ShowMem(addr1, addr2) => {
+                let mut idx = 0;
+                
+                loop {
+                    if idx % 16 == 0 {
+                        print!("{0:x}: ", addr1 + idx);
+                    }
+                    print!("{0:02x} ", mem.mmu.read_u8(&mut mem.ppu, addr1 + idx));
+                    
+                    if (addr1 + idx) == addr2 {
+                        break;
+                    }
+                    
+                    idx += 1;
+                    
+                    if (idx % 16) == 0 {
+                        println!("");
+                    }
+                }
+                println!("");
+            },
             DebuggerCommand::ToggleDebug => cpu.is_debugging = !cpu.is_debugging,
             DebuggerCommand::RunCpuUntil(cond) => {
                 cond_met = false;
