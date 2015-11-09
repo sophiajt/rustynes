@@ -158,39 +158,24 @@ impl Cpu {
     }
     
     fn absolute_write(&mut self, mem: &mut Memory,c: u8, d: u8, data: u8) {
-        if make_address(c, d) == 0x204 {
-            println!("Write to 0x204 at {0:x}", self.pc);
-        }
         mem.mmu.write_u8(&mut mem.ppu, make_address(c, d), data);
     }
     
     fn absolute_x_write(&mut self, mem: &mut Memory,c: u8, d: u8, data: u8) {
-        if make_address(c, d) + self.x as u16 == 0x204 {
-            println!("Write to 0x204 at {0:x}", self.pc);
-        }
         mem.mmu.write_u8(&mut mem.ppu, make_address(c, d) + self.x as u16, data);
     }
     
     fn absolute_y_write(&mut self, mem: &mut Memory,c: u8, d: u8, data: u8) {
-        if make_address(c, d) + self.y as u16 == 0x204 {
-            println!("Write to 0x204 at {0:x}", self.pc);
-        }
         mem.mmu.write_u8(&mut mem.ppu, make_address(c, d) + self.y as u16, data);
     }
     
     fn indirect_x_write(&mut self, mem: &mut Memory,c: u8, data: u8) {
         let new_addr = mem.mmu.read_u16(&mut mem.ppu, 0xff & (c as u16 + self.x as u16));
-        if new_addr == 0x204 {
-            println!("Write to 0x204 at {0:x}", self.pc);
-        }
         mem.mmu.write_u8(&mut mem.ppu, new_addr, data);
     }
     
     fn indirect_y_write(&mut self, mem: &mut Memory,c: u8, data: u8) {
         let new_addr = mem.mmu.read_u16(&mut mem.ppu, c as u16) + self.y as u16;
-        if new_addr == 0x204 {
-            println!("Write to 0x204 at {0:x}", self.pc);
-        }
         mem.mmu.write_u8(&mut mem.ppu, new_addr, data);
     }
     
