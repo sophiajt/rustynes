@@ -30,7 +30,7 @@ pub type BitsPerPixel = u32;
  
 pub struct Ppu {
     execute_nmi_on_vblank: bool,
-    ppu_master: u8,
+    //ppu_master: u8,
     sprite_size: usize,
     background_address: usize,
     sprite_address: usize,
@@ -90,7 +90,7 @@ impl Ppu {
     pub fn new() -> Ppu {
         Ppu {
             execute_nmi_on_vblank: false,
-            ppu_master: 0xff,
+            //ppu_master: 0xff,
             sprite_size: 8,
             background_address: 0x0000,
             sprite_address: 0x0000,
@@ -130,24 +130,26 @@ impl Ppu {
         self.sprite_address = if (data & 0x8) == 0x8 {0x1000} else {0};
         self.ppu_address_increment = if (data & 0x4) == 0x4 {32} else {1};
         
+        /*
         if self.background_visible || (self.ppu_master == 0xff) || 
             (self.ppu_master == 1) {
-            
-            match data & 0x3 {
-                0 => self.name_table_address = 0x2000,
-                1 => self.name_table_address = 0x2400,
-                2 => self.name_table_address = 0x2800,
-                3 => self.name_table_address = 0x2c00,
-                _ => {}
-            }
-            
-            println!("name table changed: {0:04x} @ {1}", self.name_table_address, self.current_scanline);
+        */    
+        match data & 0x3 {
+            0 => self.name_table_address = 0x2000,
+            1 => self.name_table_address = 0x2400,
+            2 => self.name_table_address = 0x2800,
+            3 => self.name_table_address = 0x2c00,
+            _ => {}
         }
+        
+        println!("name table changed: {0:04x} @ {1}", self.name_table_address, self.current_scanline);
+        //}
         
         if self.fix_bg_change && self.current_scanline == 241 {
             self.name_table_address = 0x2000;
         }
         
+        /*
         if self.ppu_master == 0xff {
             if (data & 0x40) == 0x40 {
                 self.ppu_master = 0;
@@ -156,6 +158,7 @@ impl Ppu {
                 self.ppu_master = 1;
             }
         }
+        */
     }
     
     pub fn control_reg_2_write(&mut self, data: u8) {

@@ -1,5 +1,6 @@
 mod util;
 mod cpu;
+mod joypad;
 mod mmu;
 mod cart;
 mod ppu;

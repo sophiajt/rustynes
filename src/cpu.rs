@@ -272,7 +272,7 @@ impl Cpu {
             if self.carry {1} else {0};
         
         self.carry = total > 0xff;
-        self.overflow = total > 0xff;
+        self.overflow = (total & 0x80) != (self.a as u16 & 0x80);
         self.zero = (total & 0xff) == 0;
         self.sign = (total & 0x80) == 0x80;        
         self.a = (total & 0xff) as u8;
@@ -1090,7 +1090,7 @@ impl Cpu {
             if self.carry {0} else {1};
         
         self.carry = total >= 0;
-        self.overflow = total < 0;
+        self.overflow = (total & 0x80) != (self.a as i16 & 0x80);
         self.zero = (total & 0xff) == 0;
         self.sign = (total & 0x80) == 0x80;        
         self.a = (total & 0xff) as u8;

@@ -1,5 +1,7 @@
 use cart::Cart;
 use ppu::Ppu;
+use joypad::{joypad_1_read, joypad_1_write,
+    joypad_2_read, joypad_2_write};
 
 pub mod mirroring {
     pub const HORIZONTAL  : u8 = 1;
@@ -11,7 +13,7 @@ pub mod mirroring {
 pub struct Mmu {
     active_prg_page: Vec<usize>,
     active_chr_page: Vec<usize>,
-    scratch_ram: Vec<Vec<u8>>,
+    scratch_ram: Vec<u8>,
     save_ram: Vec<u8>,
     is_save_ram_readonly: bool,
     
@@ -43,10 +45,7 @@ impl Mmu {
             active_chr_page.push(x);
         }
         
-        let mut scratch_ram : Vec<Vec<u8>> = Vec::new();
-        for _ in 0..4 {
-            scratch_ram.push(vec![0; 0x800]);
-        }
+        let scratch_ram : Vec<u8> = vec![0; 0x800];
         
         let save_ram : Vec<u8> = vec![0; 0x2000];
                 
@@ -97,13 +96,15 @@ impl Mmu {
     
     pub fn read_u8(&self, ppu: &mut Ppu, address: u16) -> u8 {
         match address {
-            0x0000...0x07FF => self.scratch_ram[0][address as usize],
-            0x0800...0x0FFF => self.scratch_ram[1][(address as usize) - 0x0800],
-            0x1000...0x17FF => self.scratch_ram[2][(address as usize) - 0x1000],
-            0x1800...0x1FFF => self.scratch_ram[3][(address as usize) - 0x1800],
+            0x0000...0x07FF => self.scratch_ram[address as usize],
+            0x0800...0x0FFF => self.scratch_ram[(address as usize) - 0x0800],
+            0x1000...0x17FF => self.scratch_ram[(address as usize) - 0x1000],
+            0x1800...0x1FFF => self.scratch_ram[(address as usize) - 0x1800],
             0x2002          => ppu.status_reg_read(),
             0x2004          => ppu.sprite_ram_io_reg_read(),
             0x2007          => ppu.vram_io_reg_read(self),
+            0x4016          => joypad_1_read(),
+            0x4017          => joypad_2_read(),
             0x6000...0x7FFF => self.save_ram[(address as usize) - 0x6000],
             0x8000...0x8FFF => self.cart.prg_rom[self.active_prg_page[0]][(address as usize) - 0x8000],
             0x9000...0x9FFF => self.cart.prg_rom[self.active_prg_page[1]][(address as usize) - 0x9000],
@@ -113,7 +114,7 @@ impl Mmu {
             0xD000...0xDFFF => self.cart.prg_rom[self.active_prg_page[5]][(address as usize) - 0xD000],
             0xE000...0xEFFF => self.cart.prg_rom[self.active_prg_page[6]][(address as usize) - 0xE000],
             0xF000...0xFFFF => self.cart.prg_rom[self.active_prg_page[7]][(address as usize) - 0xF000],
-            _ => 0 // {println!("Unknown read: {0:x}", address); 0}
+            _ => {println!("Unknown read: {0:x}", address); 0}
         }
     }
     
@@ -126,10 +127,10 @@ impl Mmu {
     
     pub fn write_u8(&mut self, ppu: &mut Ppu, address: u16, data: u8) {
         match address {
-            0x0000...0x07FF => self.scratch_ram[0][address as usize]            = data,
-            0x0800...0x0FFF => self.scratch_ram[1][(address as usize) - 0x0800] = data,
-            0x1000...0x17FF => self.scratch_ram[2][(address as usize) - 0x1000] = data,
-            0x1800...0x1FFF => self.scratch_ram[3][(address as usize) - 0x1800] = data,
+            0x0000...0x07FF => self.scratch_ram[address as usize]            = data,
+            0x0800...0x0FFF => self.scratch_ram[(address as usize) - 0x0800] = data,
+            0x1000...0x17FF => self.scratch_ram[(address as usize) - 0x1000] = data,
+            0x1800...0x1FFF => self.scratch_ram[(address as usize) - 0x1800] = data,
             0x2000          => ppu.control_reg_1_write(data),
             0x2001          => ppu.control_reg_2_write(data),
             0x2003          => ppu.sprite_ram_addr_reg_write(data),
@@ -138,12 +139,15 @@ impl Mmu {
             0x2006          => ppu.vram_addr_reg_2_write(data),
             0x2007          => ppu.vram_io_reg_write(self, data),
             0x4014          => ppu.sprite_ram_dma_begin(self, data),
+            0x4015          => {}, // Sound signal write
+            0x4016          => joypad_1_write(data),
+            0x4017          => joypad_2_write(data),
             0x6000...0x7FFF => 
                 if self.is_save_ram_readonly { 
                     self.save_ram[(address as usize) - 0x6000] = data;
                 },
             0x8000...0xFFFF => self.write_prg_rom(address, data),
-            _ => {} //println!("Unknown write of {0:x} to {1:x}", data, address)
+            _ => println!("Unknown write of {0:x} to {1:x}", data, address)
         }
     }
     
