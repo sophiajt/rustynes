@@ -37,7 +37,11 @@ impl Memory {
     
         //Then hand off cart, after this the MMU is the only one
         //who can access program memory
-        let mmu = Mmu::new(cart);
+        let mut mmu = Mmu::new(cart);
+        
+        //Before we're done, we also have to reset our mapper to 
+        //its default
+        mmu.setup_defaults();
         
         Memory { ppu: ppu, mmu: mmu }
     }
@@ -133,7 +137,18 @@ fn prompt(prev_command: DebuggerCommand, info: &String) -> Result<DebuggerComman
                 "ppu" => return Ok(DebuggerCommand::ShowPpu),
                 "debug" => return Ok(DebuggerCommand::ToggleDebug),
                 "ppm" => return Ok(DebuggerCommand::Ppm),
-                "frame" | "fr" => return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunFrame)),
+                "frame" | "fr" => {
+                    if parts.len() == 1 {
+                        return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunFrame));
+                    }
+                    else {
+                        let toframe = parts[1];
+                        match usize::from_str_radix(toframe, 10) {
+                            Ok(val) => return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunUntilFrame(val))),
+                            _ => println!("Supply a frame to break on. Eg: frame 100")
+                        }
+                    }
+                },
                 "sl" => return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunToScanline)),
                 "next" | "n" => return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunNext)),
                 "break" | "br" => {
@@ -205,7 +220,7 @@ fn prompt(prev_command: DebuggerCommand, info: &String) -> Result<DebuggerComman
                     println!("  mem: toggle showing mem contents");
                     println!("  debug: toggle cpu verbose debug");
                     println!("  ppu: show ppu contents");
-                    println!("  fr(ame): run until next video frame");
+                    println!("  fr(ame) (<num>): run until next video frame or #num");
                     println!("  br(eak) <addr>: run until pc == addr");
                     println!("  sl: run until next scanline");
                     println!("  n(ext): run until next instruction");
@@ -328,13 +343,14 @@ pub fn run_cart(fname: &String) -> Result<(), io::Error> {
                         
                         if mem.ppu.current_scanline == 240 {
                             //output_ppm(&mem.ppu, frame_count);
-                            match cond {
-                                BreakCondition::RunFrame => cond_met = true,
-                                _ => {}
-                            }
-                            
                             println!("Frame: {}", frame_count);
                             frame_count += 1;
+
+                            match cond {
+                                BreakCondition::RunFrame => cond_met = true,
+                                BreakCondition::RunUntilFrame(f) => if frame_count == f { cond_met = true; },
+                                _ => {}
+                            }                            
                         }
                         
                         mem.mmu.tick_timer();

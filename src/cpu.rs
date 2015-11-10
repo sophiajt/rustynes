@@ -17,7 +17,8 @@ pub enum BreakCondition {
     RunToPc(u16),
     RunNext,
     RunToScanline,
-    RunFrame
+    RunFrame,
+    RunUntilFrame(usize)
 }
 
 pub struct Cpu {
@@ -1376,7 +1377,8 @@ impl Cpu {
             0xe5 => "sbc", 
             0xe6 => "inc", 
             0xe8 => "inx", 
-            0xe9 => "sbc", 
+            0xe9 => "sbc",
+            0xea => "nop",
             0xec => "cpx", 
             0xed => "sbc", 
             0xee => "inc", 
@@ -1539,7 +1541,8 @@ impl Cpu {
             0xe5 => self.sbc(mem), 
             0xe6 => self.inc(mem),
             0xe8 => self.inx(), 
-            0xe9 => self.sbc(mem), 
+            0xe9 => self.sbc(mem),
+            0xea => self.nop(),
             0xec => self.cpx(mem), 
             0xed => self.sbc(mem), 
             0xee => self.inc(mem), 
@@ -1572,7 +1575,8 @@ impl Cpu {
                 &BreakCondition::RunToPc(pc)   => if self.pc == pc { return true; },
                 &BreakCondition::RunNext       => if self.tick_count != starting_tick_count { return true; },
                 &BreakCondition::RunToScanline => if self.tick_count >= TICKS_PER_SCANLINE { return true; },
-                &BreakCondition::RunFrame      => {}
+                &BreakCondition::RunFrame |
+                &BreakCondition::RunUntilFrame(_) => {}
             }
         }
         

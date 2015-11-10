@@ -140,6 +140,8 @@ impl Ppu {
                 3 => self.name_table_address = 0x2c00,
                 _ => {}
             }
+            
+            println!("name table changed: {0:04x} @ {1}", self.name_table_address, self.current_scanline);
         }
         
         if self.fix_bg_change && self.current_scanline == 241 {
@@ -188,6 +190,7 @@ impl Ppu {
     pub fn vram_addr_reg_1_write(&mut self, data: u8) {
         if self.vram_hi_lo_toggle == 1 {
             self.scroll_v = data;
+            println!("scroll v: {} @ {}", self.scroll_v, self.current_scanline);
             self.vram_hi_lo_toggle = 0;
         }
         else {
@@ -208,6 +211,7 @@ impl Ppu {
             if self.fix_scroll_offset_3 && self.current_scanline < 240 {                
                 self.scroll_h = 238;
             }
+            println!("scroll h: {} @ {}", self.scroll_h, self.current_scanline);
         
             self.vram_hi_lo_toggle = 1;
         }
@@ -225,9 +229,12 @@ impl Ppu {
             
             if (self.prev_vram_rw_addr == 0) && (self.current_scanline < 240) {
                 //check for scrolling trick
+                /*
                 if (self.vram_rw_addr >= 0x2000) && (self.vram_rw_addr <= 0x2400) {
+                    println!("rw: {0:04x} scanline: {1}", self.vram_rw_addr, self.current_scanline);
                     self.scroll_h = (((self.vram_rw_addr - 0x2000) / 0x20) * 8 - self.current_scanline) as u8;
                 }
+                */
             }
             self.vram_hi_lo_toggle = 1;
         }
@@ -330,11 +337,11 @@ impl Ppu {
     }
     
     pub fn sprite_ram_dma_begin(&mut self, mmu: &Mmu, data: u8) {
-        println!("Sprite RAM DMA from 0x{0:x}", (data as u16) * 0x100);
+        //println!("Sprite RAM DMA from 0x{0:x}", (data as u16) * 0x100);
         for i in 0..256 {
             self.sprite_ram[i] = mmu.read_u8(self, (data as u16) * 0x100 + i as u16);
         }
-        println!("{:?}", self.sprite_ram);
+        //println!("{:?}", self.sprite_ram);
     }
     
     fn render_background(&mut self, mmu: &mut Mmu) {

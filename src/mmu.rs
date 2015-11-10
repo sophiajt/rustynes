@@ -14,6 +14,23 @@ pub struct Mmu {
     scratch_ram: Vec<Vec<u8>>,
     save_ram: Vec<u8>,
     is_save_ram_readonly: bool,
+    
+    //Mapper-specific registers
+    map1_reg_8000_bit: usize,
+    map1_reg_a000_bit: usize,
+    map1_reg_c000_bit: usize,
+    map1_reg_e000_bit: usize,
+    map1_reg_8000_val: usize,
+    map1_reg_a000_val: usize,
+    map1_reg_c000_val: usize,
+    map1_reg_e000_val: usize,
+    
+    map1_mirroring_flag: u8,
+    map1_one_page_mirroring: u8,
+    map1_prg_switch_area: u8,
+    map1_prg_switch_size: u8,
+    map1_vrom_switch_size: u8,
+    
     cart: Cart
 }
 
@@ -32,7 +49,7 @@ impl Mmu {
         }
         
         let save_ram : Vec<u8> = vec![0; 0x2000];
-        
+                
         // Start with the default mirroring loaded from the cart, 
         // but may change via the mapper
 
@@ -42,7 +59,39 @@ impl Mmu {
             scratch_ram: scratch_ram,
             save_ram: save_ram,
             is_save_ram_readonly: false,
+            
+            //Mapper-specific registers
+            map1_reg_8000_bit: 0,
+            map1_reg_a000_bit: 0,
+            map1_reg_c000_bit: 0,
+            map1_reg_e000_bit: 0,
+            map1_reg_8000_val: 0,
+            map1_reg_a000_val: 0,
+            map1_reg_c000_val: 0,
+            map1_reg_e000_val: 0,
+            
+            map1_mirroring_flag: 0,
+            map1_one_page_mirroring: 0,
+            map1_prg_switch_area: 0,
+            map1_prg_switch_size: 0,
+            map1_vrom_switch_size: 0,
+            
             cart: cart
+        }
+    }
+    
+    pub fn setup_defaults(&mut self) {
+        if self.cart.mapper == 1 {
+            self.map1_reg_8000_bit = 0;
+            self.map1_reg_8000_val = 0;
+            self.map1_mirroring_flag = 0;
+            self.map1_one_page_mirroring = 1;
+            self.map1_prg_switch_area = 1;
+            self.map1_prg_switch_size = 1;
+            self.map1_vrom_switch_size = 0;
+            
+            let num_prg = self.cart.num_prg_pages;
+            self.switch_16k_prg_page((num_prg - 1) * 4, 1);
         }
     }
     
@@ -64,7 +113,7 @@ impl Mmu {
             0xD000...0xDFFF => self.cart.prg_rom[self.active_prg_page[5]][(address as usize) - 0xD000],
             0xE000...0xEFFF => self.cart.prg_rom[self.active_prg_page[6]][(address as usize) - 0xE000],
             0xF000...0xFFFF => self.cart.prg_rom[self.active_prg_page[7]][(address as usize) - 0xF000],
-            _ => {println!("Unknown read: {0:x}", address); 0}
+            _ => 0 // {println!("Unknown read: {0:x}", address); 0}
         }
     }
     
@@ -93,12 +142,25 @@ impl Mmu {
                 if self.is_save_ram_readonly { 
                     self.save_ram[(address as usize) - 0x6000] = data;
                 },
-            _ => println!("Unknown write of {0:x} to {1:x}", data, address)
+            0x8000...0xFFFF => self.write_prg_rom(address, data),
+            _ => {} //println!("Unknown write of {0:x} to {1:x}", data, address)
         }
     }
     
     pub fn write_chr_rom(&mut self, addr: usize, data:u8) {
-        println!("Write to chr rom of {0:x} at {1:x}", data, addr);
+        if self.cart.is_vram {
+            match addr {
+                0x0000...0x03ff => self.cart.chr_rom[self.active_chr_page[0]][addr] = data,
+                0x0400...0x07ff => self.cart.chr_rom[self.active_chr_page[1]][addr - 0x400] = data,
+                0x0800...0x0bff => self.cart.chr_rom[self.active_chr_page[2]][addr - 0x800] = data,
+                0x0c00...0x0fff => self.cart.chr_rom[self.active_chr_page[3]][addr - 0xc00] = data,
+                0x1000...0x13ff => self.cart.chr_rom[self.active_chr_page[4]][addr - 0x1000] = data,
+                0x1400...0x17ff => self.cart.chr_rom[self.active_chr_page[5]][addr - 0x1400] = data,
+                0x1800...0x1bff => self.cart.chr_rom[self.active_chr_page[6]][addr - 0x1800] = data,
+                0x1c00...0x1fff => self.cart.chr_rom[self.active_chr_page[7]][addr - 0x1c00] = data,
+                _ => {}
+            }
+        }
     }
     
     pub fn read_chr_rom(&self, addr: usize) -> u8 {
@@ -128,6 +190,245 @@ impl Mmu {
         }
     }
     
+    fn switch_32k_prg_page(&mut self, start: usize) {
+        let start_page = match self.cart.num_prg_pages {
+            2 => start & 0x7,
+            4 => start & 0xf,
+            8 => start & 0x1f,
+            16 => start & 0x3f,
+            32 => start & 0x7f,
+            _ => 0
+        };
+        
+        for i in 0..8 {
+            self.active_prg_page[i] = start_page + i;
+        }
+    }
+    
+    fn switch_16k_prg_page(&mut self, start: usize, area: usize) {
+        let start_page = match self.cart.num_prg_pages {
+            2 => start & 0x7,
+            4 => start & 0xf,
+            8 => start & 0x1f,
+            16 => start & 0x3f,
+            32 => start & 0x7f,
+            _ => 0
+        };
+        
+        println!("Switching 16k prg: {} {}", start_page, area);
+        
+        for i in 0..4 {
+            self.active_prg_page[i + 4 * area] = start_page + i;
+        }
+    }
+    
+    /*
+    fn switch_8k_prg_page(&mut self, start: usize, area: usize) {
+        let start_page = match self.cart.num_prg_pages {
+            2 => start & 0x7,
+            4 => start & 0xf,
+            8 => start & 0x1f,
+            16 => start & 0x3f,
+            32 => start & 0x7f,
+            _ => 0
+        };
+        
+        for i in 0..2 {
+            self.active_prg_page[i + 2 * area] = start_page + i;
+        }
+    }
+    */
+    
+    fn switch_8k_chr_page(&mut self, start: usize) {
+        let start_page = match self.cart.num_chr_pages {
+            2 => start & 0xf,
+            4 => start & 0x1f,
+            8 => start & 0x3f,
+            16 => start & 0x7f,
+            32 => start & 0xff,
+            _ => 0
+        };
+        
+        for i in 0..8 {
+            self.active_chr_page[i] = start_page + i;
+        }              
+    }
+        
+    fn switch_4k_chr_page(&mut self, start: usize, area: usize) {
+        let start_page = match self.cart.num_chr_pages {
+            2 => start & 0xf,
+            4 => start & 0x1f,
+            8 => start & 0x3f,
+            16 => start & 0x7f,
+            32 => start & 0xff,
+            _ => 0
+        };
+        
+        for i in 0..4 {
+            self.active_chr_page[i + 4 * area] = start_page + i;
+        }              
+    }
+    
+    /*
+    fn switch_2k_chr_page(&mut self, start: usize, area: usize) {
+        let start_page = match self.cart.num_chr_pages {
+            2 => start & 0xf,
+            4 => start & 0x1f,
+            8 => start & 0x3f,
+            16 => start & 0x7f,
+            32 => start & 0xff,
+            _ => 0
+        };
+        
+        for i in 0..2 {
+            self.active_chr_page[i + 2 * area] = start_page + i;
+        }              
+    }
+        
+    fn switch_1k_chr_page(&mut self, start: usize, area: usize) {
+        let start_page = match self.cart.num_chr_pages {
+            2 => start & 0xf,
+            4 => start & 0x1f,
+            8 => start & 0x3f,
+            16 => start & 0x7f,
+            32 => start & 0xff,
+            _ => 0
+        };
+        
+        self.active_chr_page[area] = start_page;              
+    }
+    */
+    
+    fn write_prg_rom(&mut self, addr: u16, data: u8) {
+        if self.cart.mapper == 1 {
+            if (addr >= 0x8000) && (addr <= 0x9fff) {
+                if (data & 0x80) == 0x80 {
+                    //reset
+                    self.map1_reg_8000_bit = 0;
+                    self.map1_reg_8000_val = 0;
+                    self.map1_mirroring_flag = 0;
+                    self.map1_one_page_mirroring = 1;
+                    self.map1_prg_switch_area = 1;
+                    self.map1_prg_switch_size = 1;
+                    self.map1_vrom_switch_size = 0;
+                }
+                else {
+                    self.map1_reg_8000_val += ((data & 0x1) << self.map1_reg_8000_bit) as usize;
+                    self.map1_reg_8000_bit += 1;
+                    if self.map1_reg_8000_bit == 5 {
+                        self.map1_mirroring_flag = (self.map1_reg_8000_val & 1) as u8;
+                        if self.map1_mirroring_flag == 0 {
+                            self.cart.mirroring = mirroring::VERTICAL;
+                        }
+                        else {
+                            self.cart.mirroring = mirroring::HORIZONTAL;
+                        }
+                        self.map1_one_page_mirroring = ((self.map1_reg_8000_val >> 1) & 1) as u8;
+                        
+                        if self.map1_one_page_mirroring == 0 {
+                            self.cart.mirroring = mirroring::ONE_SCREEN;
+                            self.cart.mirroring_base = 0x2000;
+                        }
+                        
+                        self.map1_prg_switch_area = ((self.map1_reg_8000_val >> 2) & 1) as u8;
+                        self.map1_prg_switch_size = ((self.map1_reg_8000_val >> 3) & 1) as u8;
+                        self.map1_vrom_switch_size = ((self.map1_reg_8000_val >> 4) & 1) as u8;
+                        
+                        self.map1_reg_8000_bit = 0;
+                        self.map1_reg_8000_val = 0;
+                        self.map1_reg_a000_bit = 0;
+                        self.map1_reg_a000_val = 0;
+                        self.map1_reg_c000_bit = 0;
+                        self.map1_reg_c000_val = 0;
+                        self.map1_reg_e000_bit = 0;
+                        self.map1_reg_e000_val = 0;
+                    }                    
+                }
+            }
+            else if (addr >= 0xa000) && (addr <= 0xbfff) {
+                if (data & 0x80) == 0x80 {
+                    self.map1_reg_a000_bit = 0;
+                    self.map1_reg_a000_val = 0;
+                }
+                else {
+                    self.map1_reg_a000_val += ((data & 0x1) << self.map1_reg_a000_bit) as usize;
+                    self.map1_reg_a000_bit += 1;
+                    
+                    if self.map1_reg_a000_bit == 5 {
+                        let val = self.map1_reg_a000_val;
+                        if self.cart.num_chr_pages > 0 {
+                            if self.map1_vrom_switch_size == 1 {
+                                self.switch_4k_chr_page(val * 4, 0);
+                            }
+                            else {
+                                self.switch_8k_chr_page((val >> 1) * 8);
+                            }
+                        }
+                        self.map1_reg_a000_bit = 0;
+                        self.map1_reg_a000_val = 0;
+                    }
+                }
+            }
+            else if (addr >= 0xc000) && (addr <= 0xdfff) {
+                if (data & 0x80) == 0x80 {
+                    self.map1_reg_c000_bit = 0;
+                    self.map1_reg_c000_val = 0;
+                }
+                else {
+                    self.map1_reg_c000_val += ((data & 0x1) << self.map1_reg_c000_bit) as usize;
+                    self.map1_reg_c000_bit += 1;
+                    
+                    if self.map1_reg_c000_bit == 5 {
+                        let val = self.map1_reg_c000_val;
+                        if self.cart.num_chr_pages > 0 {
+                            if self.map1_vrom_switch_size == 1 {
+                                self.switch_4k_chr_page(val * 4, 1);
+                            }
+                        }
+                        self.map1_reg_c000_bit = 0;
+                        self.map1_reg_c000_val = 0;
+                    }
+                }
+            }
+            else if addr >= 0xe000 {
+                if (data & 0x80) == 0x80 {
+                    self.map1_reg_8000_bit = 0;
+                    self.map1_reg_8000_val = 0;
+                    self.map1_reg_a000_bit = 0;
+                    self.map1_reg_a000_val = 0;
+                    self.map1_reg_c000_bit = 0;
+                    self.map1_reg_c000_val = 0;
+                    self.map1_reg_e000_bit = 0;
+                    self.map1_reg_e000_val = 0;                
+                }
+                else {
+                    self.map1_reg_e000_val += ((data & 0x1) << self.map1_reg_e000_bit) as usize;
+                    self.map1_reg_e000_bit += 1;
+                    
+                    if self.map1_reg_e000_bit == 5 {
+                        let val = self.map1_reg_e000_val;
+                        let num_prg = self.cart.num_prg_pages;
+                        if self.map1_prg_switch_size == 1 {
+                            if self.map1_prg_switch_area == 1 {
+                                self.switch_16k_prg_page(val * 4, 0);
+                                self.switch_16k_prg_page((num_prg - 1) * 4, 1);
+                            }
+                            else {
+                                self.switch_16k_prg_page(val * 4, 1);
+                                self.switch_16k_prg_page(0, 0);
+                            }
+                        }
+                        else {
+                            self.switch_32k_prg_page((val >> 1) * 8);
+                        }
+                        self.map1_reg_e000_bit = 0;
+                        self.map1_reg_e000_val = 0;
+                    }
+                }                    
+            }
+        }
+    }
+        
     pub fn mirroring(&self) -> u8 {
         self.cart.mirroring
     }

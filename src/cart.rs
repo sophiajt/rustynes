@@ -12,7 +12,7 @@ pub struct Cart {
     pub mirroring_base: usize, 
     trainer_present: bool,
     save_ram_present: bool,
-    is_vram: bool,
+    pub is_vram: bool,
     pub mapper: u8,
     pub num_prg_pages: usize,
     pub num_chr_pages: usize
@@ -30,8 +30,8 @@ impl Cart {
             return Err(Error::new(ErrorKind::InvalidInput, "File is not a compatible .nes file"));
         }
         
-        let num_prg_pages = try!(f.read_u8()) * 4;
-        let num_chr_pages = try!(f.read_u8()) * 8;
+        let num_prg_pages = try!(f.read_u8());
+        let num_chr_pages = try!(f.read_u8());
         let is_vram = num_chr_pages == 0;
         let cart_info = try!(f.read_u8());
         let mirroring = 
@@ -62,14 +62,14 @@ impl Cart {
         try!(f.read(&mut _unused_buffer));
         
         let mut prg_rom : Vec<Vec<u8>> = Vec::new();
-        for _ in 0..num_prg_pages {
+        for _ in 0..(num_prg_pages*4) {
             let mut buffer = [0; 4096];
             try!(f.read(&mut buffer));
             prg_rom.push(buffer.iter().cloned().collect());
         }
         let mut chr_rom : Vec<Vec<u8>> = Vec::new();
         if num_chr_pages > 0 {            
-            for _ in 0..num_chr_pages {
+            for _ in 0..(num_chr_pages*8) {
                 let mut buffer = [0; 1024];
                 try!(f.read(&mut buffer));
                 chr_rom.push(buffer.iter().cloned().collect());
@@ -81,8 +81,8 @@ impl Cart {
             }
         }
         
-        println!("Prg roms: {}", num_prg_pages);
-        println!("Chr roms: {}", num_chr_pages);
+        println!("Prg roms: {}", num_prg_pages * 4);
+        println!("Chr roms: {}", num_chr_pages * 8);
         println!("Is_vram: {}", is_vram);
         println!("Mirroring: {:?}", mirroring);
         println!("Save ram present: {}", save_ram_present);
