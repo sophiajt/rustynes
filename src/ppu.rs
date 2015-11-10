@@ -30,7 +30,7 @@ pub type BitsPerPixel = u32;
  
 pub struct Ppu {
     execute_nmi_on_vblank: bool,
-    //ppu_master: u8,
+    ppu_master: u8,
     sprite_size: usize,
     background_address: usize,
     sprite_address: usize,
@@ -69,7 +69,8 @@ pub struct Ppu {
     pub fix_scroll_offset_1: bool,
     pub fix_scroll_offset_2: bool,
     pub fix_scroll_offset_3: bool,
-    pub fix_bg_change: bool            
+    pub fix_bg_change: bool,
+    pub fix_scroll_reset: bool            
 }
 
 impl fmt::Debug for Ppu {
@@ -90,7 +91,7 @@ impl Ppu {
     pub fn new() -> Ppu {
         Ppu {
             execute_nmi_on_vblank: false,
-            //ppu_master: 0xff,
+            ppu_master: 0xff,
             sprite_size: 8,
             background_address: 0x0000,
             sprite_address: 0x0000,
@@ -116,6 +117,7 @@ impl Ppu {
             fix_scroll_offset_2: false,
             fix_scroll_offset_3: false,
             fix_bg_change: false,
+            fix_scroll_reset: false,
             name_tables: vec![0; 0x2000],
             sprite_ram: vec![0; 0x100],
             offscreen_buffer: vec![0; 256*240],
@@ -130,26 +132,23 @@ impl Ppu {
         self.sprite_address = if (data & 0x8) == 0x8 {0x1000} else {0};
         self.ppu_address_increment = if (data & 0x4) == 0x4 {32} else {1};
         
-        /*
-        if self.background_visible || (self.ppu_master == 0xff) || 
-            (self.ppu_master == 1) {
-        */    
-        match data & 0x3 {
-            0 => self.name_table_address = 0x2000,
-            1 => self.name_table_address = 0x2400,
-            2 => self.name_table_address = 0x2800,
-            3 => self.name_table_address = 0x2c00,
-            _ => {}
-        }
-        
-        println!("name table changed: {0:04x} @ {1}", self.name_table_address, self.current_scanline);
+        //if self.background_visible || (self.ppu_master == 0xff) || 
+        //    (self.ppu_master == 1) {
+            match data & 0x3 {
+                0 => self.name_table_address = 0x2000,
+                1 => self.name_table_address = 0x2400,
+                2 => self.name_table_address = 0x2800,
+                3 => self.name_table_address = 0x2c00,
+                _ => {}
+            }
+            
+            println!("name table changed: {0:04x} @ {1}", self.name_table_address, self.current_scanline);
         //}
         
         if self.fix_bg_change && self.current_scanline == 241 {
             self.name_table_address = 0x2000;
         }
         
-        /*
         if self.ppu_master == 0xff {
             if (data & 0x40) == 0x40 {
                 self.ppu_master = 0;
@@ -158,7 +157,6 @@ impl Ppu {
                 self.ppu_master = 1;
             }
         }
-        */
     }
     
     pub fn control_reg_2_write(&mut self, data: u8) {
@@ -167,7 +165,7 @@ impl Ppu {
         self.no_sprite_clipping = (data & 0x4) == 0x4;
         self.background_visible = (data & 0x8) == 0x8;
         self.sprites_visible = (data & 0x10) == 0x10;
-        self.ppu_color = (data >> 5) as i32;
+        self.ppu_color = ((data >> 5) & 0x1f) as i32;
     }
     
     pub fn status_reg_read(&mut self) -> u8 {
@@ -232,12 +230,12 @@ impl Ppu {
             
             if (self.prev_vram_rw_addr == 0) && (self.current_scanline < 240) {
                 //check for scrolling trick
-                /*
+                
                 if (self.vram_rw_addr >= 0x2000) && (self.vram_rw_addr <= 0x2400) {
                     println!("rw: {0:04x} scanline: {1}", self.vram_rw_addr, self.current_scanline);
-                    self.scroll_h = (((self.vram_rw_addr - 0x2000) / 0x20) * 8 - self.current_scanline) as u8;
+                    self.scroll_h = (((self.vram_rw_addr as i32 - 0x2000) / 0x20) * 8 - self.current_scanline as i32) as u8;
                 }
-                */
+                
             }
             self.vram_hi_lo_toggle = 1;
         }
@@ -421,23 +419,24 @@ impl Ppu {
             
             for current_col in start_column..end_column {
                 // grab the bg tile for the given column and scanline
-
+                
+                let tile_row = virtual_scanline / 8;
+                let tile_offset = virtual_scanline % 8;
+                
                 let tile_num = self.name_tables[name_table_base - 0x2000 + 
-                    ((virtual_scanline / 8) * 32) + current_col as usize];
+                    (tile_row * 32) + current_col as usize];
                 
                 let tile_data_offset = self.background_address + (tile_num as usize) * 16;
                 
-                let tile_data_1 = mmu.read_chr_rom(tile_data_offset + 
-                    (virtual_scanline % 8));
-                let tile_data_2 = mmu.read_chr_rom(tile_data_offset + 
-                    (virtual_scanline % 8) + 8);
+                let tile_data_1 = mmu.read_chr_rom(tile_data_offset + tile_offset);
+                let tile_data_2 = mmu.read_chr_rom(tile_data_offset + tile_offset + 8);
                     
                 // next, calculate where to go in the palette table
                 
                 let mut palette_high_bits = self.name_tables[((name_table_base - 0x2000 + 
-                    0x3c0 + (((virtual_scanline / 8) / 4) * 8) + ((current_col / 4) as usize)))];
-                palette_high_bits = palette_high_bits >> ((4 * (((virtual_scanline / 8 ) % 4) / 2)) + 
-                    (2 * ((current_col % 4) / 2)) as usize);
+                    0x3c0 + ((tile_row / 4) * 8) + ((current_col / 4) as usize)))];
+                palette_high_bits = palette_high_bits >> ((4 * ((tile_row % 4) >> 1)) + 
+                    ((current_col % 4) & 0x2) as usize);
                 palette_high_bits = (palette_high_bits & 0x3) << 2;
                 
                 // that was fun, now we have enough to render the tile
@@ -665,12 +664,15 @@ impl Ppu {
         
         if self.fix_scroll_offset_1 {
             if self.current_scanline > 244 {
-                self.sprite_0_hit = false;
+                //self.sprite_0_hit = false;
             }
         }
         
         if self.current_scanline > 262 {
             self.current_scanline = 0;
+            if self.fix_scroll_reset {
+                self.name_table_address = 0x2000;
+            }
             self.sprite_0_hit = false;
         }
         

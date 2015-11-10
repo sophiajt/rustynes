@@ -334,7 +334,7 @@ impl Cpu {
                 0x06 => self.zero_page(mem, arg1),
                 0x16 => self.zero_page_x(mem, arg1),
                 0x0e => self.absolute(mem, arg1, arg2),
-                0x1e => self.absolute_x(mem, arg1, arg2, true),
+                0x1e => self.absolute_x(mem, arg1, arg2, false),
                 _ => {println!("Unknown opcode"); 0}
             };
         
@@ -424,7 +424,7 @@ impl Cpu {
         match self.current_opcode {
             0x24 => {self.tick_count += 3; self.pc += 2},
             0x2c => {self.tick_count += 4; self.pc += 3},
-            _ => {}
+            _ => println!("unknown opcode in bit")
         }
     }
     
@@ -637,7 +637,7 @@ impl Cpu {
                 0xc6 => self.zero_page(mem, arg1),
                 0xd6 => self.zero_page_x(mem, arg1),
                 0xce => self.absolute(mem, arg1, arg2),
-                0xde => self.absolute_x(mem, arg1, arg2, true),
+                0xde => self.absolute_x(mem, arg1, arg2, false),
                 _ => {println!("Unknown opcode"); 0}
             };
         
@@ -715,11 +715,12 @@ impl Cpu {
         self.zero = self.a == 0;
         self.sign = (self.a & 0x80) == 0x80;
         
+        //FIXME: I think 4d tick is 4, but need to confirm
         match self.current_opcode {
             0x49 => {self.tick_count += 2; self.pc += 2},
             0x45 => {self.tick_count += 3; self.pc += 2},
             0x55 => {self.tick_count += 4; self.pc += 2},
-            0x4d => {self.tick_count += 4; self.pc += 3},
+            0x4d => {self.tick_count += 3; self.pc += 3},
             0x5d => {self.tick_count += 4; self.pc += 3},
             0x59 => {self.tick_count += 4; self.pc += 3},
             0x41 => {self.tick_count += 6; self.pc += 2},
@@ -737,7 +738,7 @@ impl Cpu {
                 0xe6 => self.zero_page(mem, arg1),
                 0xf6 => self.zero_page_x(mem, arg1),
                 0xee => self.absolute(mem, arg1, arg2),
-                0xfe => self.absolute_x(mem, arg1, arg2, true),
+                0xfe => self.absolute_x(mem, arg1, arg2, false),
                 _ => {println!("Unknown opcode"); 0}
             };
         
@@ -901,7 +902,7 @@ impl Cpu {
                 _ => {println!("Unknown opcode"); 0}
             };
         
-        self.carry = (self.a & 0x1) == 0x1;
+        self.carry = (value & 0x1) == 0x1;
         value = value >> 1;
         self.zero = value == 0;
         self.sign = (value & 0x80) == 0x80;        
@@ -939,7 +940,7 @@ impl Cpu {
                 0x1d => self.absolute_x(mem, arg1, arg2, true),
                 0x19 => self.absolute_y(mem, arg1, arg2, true),
                 0x01 => self.indirect_x(mem, arg1),
-                0x11 => self.indirect_y(mem, arg1, true),
+                0x11 => self.indirect_y(mem, arg1, false),
                 _ => {println!("Unknown opcode"); 0}
             };
         
@@ -1027,7 +1028,7 @@ impl Cpu {
         let arg1 = mem.mmu.read_u8(&mut mem.ppu, self.pc + 1);
         let arg2 = mem.mmu.read_u8(&mut mem.ppu, self.pc + 2);
         
-        let mut value = 
+        let mut value : u8 = 
             match self.current_opcode {
                 0x6a => self.a,
                 0x66 => self.zero_page(mem, arg1),
@@ -1038,7 +1039,7 @@ impl Cpu {
             };
         
         let bit = (value & 0x1) == 0x1;
-        value = value >> 1;
+        value = (value >> 1) & 0x7f;
         value += if self.carry {0x80} else {0};
         self.carry = bit;
         self.zero = value == 0;
@@ -1083,7 +1084,7 @@ impl Cpu {
                 0xfd => self.absolute_x(mem, arg1, arg2, true),
                 0xf9 => self.absolute_y(mem, arg1, arg2, true),
                 0xe1 => self.indirect_x(mem, arg1),
-                0xf1 => self.indirect_y(mem, arg1, true),
+                0xf1 => self.indirect_y(mem, arg1, false),
                 _ => {println!("Unknown opcode"); 0}
             };
         let total : i16 = self.a as i16 - value as i16 - 

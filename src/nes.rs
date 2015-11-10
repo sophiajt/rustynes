@@ -93,6 +93,11 @@ fn configure_ppu_for_cart(ppu: &mut Ppu, cart: &Cart) {
         (cart.prg_rom[0][0x7c] == 0x03) && 
         (cart.prg_rom[0][0x7d] == 0x03);  
     
+    ppu.fix_scroll_reset = 
+        (cart.prg_rom[0][0xfeb - 0x10] == 0xFA) &&
+        (cart.prg_rom[0][0xfec - 0x10] == 0xA9) &&
+        (cart.prg_rom[0][0xfed - 0x10] == 0x18);
+        
 }
 
 pub fn output_ppm(ppu: &Ppu, frame: usize) -> Result<(), io::Error> {
