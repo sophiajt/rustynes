@@ -205,7 +205,7 @@ impl Mmu {
             8 => start & 0x1f,
             16 => start & 0x3f,
             32 => start & 0x7f,
-            _ => 0
+            _ => {println!("Error: bad 32k switch"); 0}
         };
         
         for i in 0..8 {
@@ -220,13 +220,13 @@ impl Mmu {
             8 => start & 0x1f,
             16 => start & 0x3f,
             32 => start & 0x7f,
-            _ => 0
+            _ => {println!("Error: bad 16k switch"); 0}
         };
         
-        println!("Switching 16k prg: {} {}", start_page, area);
+        //println!("Switching 16k prg: {} {}", start_page, area);
         
         for i in 0..4 {
-            self.active_prg_page[i + 4 * area] = start_page + i;
+            self.active_prg_page[4 * area + i] = start_page + i;
         }
     }
     
@@ -254,7 +254,7 @@ impl Mmu {
             8 => start & 0x3f,
             16 => start & 0x7f,
             32 => start & 0xff,
-            _ => 0
+            _ => {println!("Error: bad 8k chr switch"); 0}
         };
         
         for i in 0..8 {
@@ -269,7 +269,7 @@ impl Mmu {
             8 => start & 0x3f,
             16 => start & 0x7f,
             32 => start & 0xff,
-            _ => 0
+            _ => {println!("Error: bad 4k chr switch"); 0}
         };
         
         for i in 0..4 {

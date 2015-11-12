@@ -294,7 +294,41 @@ fn print_ppu_addr(mem: &mut Memory, addr1: u16, addr2: u16) {
     println!("");
 }
 
-pub fn run_cart(fname: &String) -> Result<(), io::Error> {
+fn draw_frame_and_pump_events(mem: &mut Memory, renderer: &mut sdl2::render::Renderer, texture: &mut sdl2::render::Texture,
+    event_pump: &mut sdl2::EventPump) -> bool {
+    
+    texture.with_lock(None, |buffer: &mut [u8], pitch: usize| {
+        for row in 0..240 {
+            for col in 0..256 {
+                let pixel = mem.ppu.offscreen_buffer[row * 256 + col];
+                let offset = row*pitch + col*3;
+                buffer[offset + 0] = (pixel >> 16) as u8;
+                buffer[offset + 1] = ((pixel >> 8) & 0xff) as u8;
+                buffer[offset + 2] = (pixel & 0xff) as u8;
+            }
+        }
+    }).unwrap();
+
+    renderer.clear();
+    renderer.copy(&texture, None, Some(Rect::new_unwrap(0, 0, 256, 240)));
+    renderer.present();
+    
+    for event in event_pump.poll_iter() {
+        match event {
+            Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => 
+                return true,
+            _ => ()
+        }
+    }
+    
+    let keys = event_pump.keyboard_state().pressed_scancodes().
+        filter_map(Keycode::from_scancode).collect();
+    mem.mmu.joypad.update_keys(keys);
+    
+    false
+}
+
+pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
     use std::cmp;
     
     let sdl_context = sdl2::init().unwrap();
@@ -331,101 +365,102 @@ pub fn run_cart(fname: &String) -> Result<(), io::Error> {
     
     cpu.reset(&mut mem);
     
-    let mut cond_met;
-    'gameloop: loop {
-        if show_cpu {
-            cpu.fetch(&mut mem);
-            debug_info = format!("[{:?}]", cpu);
+    if !use_debug {
+        'gameloop: loop {
+            cpu.run_for_scanline(&mut mem);
+            cpu.tick_count -= TICKS_PER_SCANLINE;
+            let execute_interrupt = mem.ppu.render_scanline(&mut mem.mmu);
+            if execute_interrupt {
+                let pc = cpu.pc;
+                cpu.push_u16(&mut mem, pc);
+                cpu.push_status(&mut mem);
+                cpu.pc = mem.mmu.read_u16(&mut mem.ppu, 0xfffa);
+            }
+            
+            if mem.ppu.current_scanline == 240 {
+                let exiting = draw_frame_and_pump_events(&mut mem, &mut renderer, &mut texture, &mut event_pump);
+                if exiting { break 'gameloop }
+                curr_timer_ticks = timer.ticks();
+                if (curr_timer_ticks - prev_timer_ticks) < TIMER_TICKS_PER_FRAME {
+                    sleep_ms(TIMER_TICKS_PER_FRAME - (curr_timer_ticks - prev_timer_ticks));
+                }
+                prev_timer_ticks = curr_timer_ticks;
+    
+                frame_count += 1;    
+            }
+            
+            mem.mmu.tick_timer();
         }
-        else {
-            debug_info = String::new();
-        }
-        
-        if show_mem {
-            print_addr(&mut mem, cpu.pc, cpu.pc + cmp::min(5, 0xffff - cpu.pc));
-        }
-        
-        let command = try!(prompt(prev_command, &debug_info));
-        prev_command = command.clone();
-        match command {
-            DebuggerCommand::Quit => break,
-            DebuggerCommand::Nop => {},
-            DebuggerCommand::Ppm => try!(output_ppm(&mem.ppu, frame_count)),
-            DebuggerCommand::ShowPpu => println!("{:?}", mem.ppu),
-            DebuggerCommand::ToggleShowCpu => show_cpu = !show_cpu,
-            DebuggerCommand::ToggleShowMem => show_mem = !show_mem,
-            DebuggerCommand::PrintAddr(addr1, addr2) => print_addr(&mut mem, addr1, addr2),
-            DebuggerCommand::PrintPpuAddr(addr1, addr2) => print_ppu_addr(&mut mem, addr1, addr2),
-            DebuggerCommand::ToggleDebug => cpu.is_debugging = !cpu.is_debugging,
-            DebuggerCommand::RunCpuUntil(cond) => {
-                cond_met = false;
-                while !cond_met {
-                    cond_met = cpu.run_until_condition(&mut mem, &cond);
-                    
-                    if cpu.tick_count >= TICKS_PER_SCANLINE {
-                        cpu.tick_count -= TICKS_PER_SCANLINE;
+    }
+    else {
+        let mut cond_met;
+        'gameloop_debug: loop {
+            if show_cpu {
+                cpu.fetch(&mut mem);
+                debug_info = format!("[{:?}]", cpu);
+            }
+            else {
+                debug_info = String::new();
+            }
+            
+            if show_mem {
+                print_addr(&mut mem, cpu.pc, cpu.pc + cmp::min(5, 0xffff - cpu.pc));
+            }
+            
+            let command = try!(prompt(prev_command, &debug_info));
+            prev_command = command.clone();
+            match command {
+                DebuggerCommand::Quit => break,
+                DebuggerCommand::Nop => {},
+                DebuggerCommand::Ppm => try!(output_ppm(&mem.ppu, frame_count)),
+                DebuggerCommand::ShowPpu => println!("{:?}", mem.ppu),
+                DebuggerCommand::ToggleShowCpu => show_cpu = !show_cpu,
+                DebuggerCommand::ToggleShowMem => show_mem = !show_mem,
+                DebuggerCommand::PrintAddr(addr1, addr2) => print_addr(&mut mem, addr1, addr2),
+                DebuggerCommand::PrintPpuAddr(addr1, addr2) => print_ppu_addr(&mut mem, addr1, addr2),
+                DebuggerCommand::ToggleDebug => cpu.is_debugging = !cpu.is_debugging,
+                DebuggerCommand::RunCpuUntil(cond) => {
+                    cond_met = false;
+                    while !cond_met {
+                        cond_met = cpu.run_until_condition(&mut mem, &cond);
                         
-                        let execute_interrupt = mem.ppu.render_scanline(&mut mem.mmu);
-                        if execute_interrupt {
-                            let pc = cpu.pc;
-                            cpu.push_u16(&mut mem, pc);
-                            cpu.push_status(&mut mem);
-                            cpu.pc = mem.mmu.read_u16(&mut mem.ppu, 0xfffa);
-                        }
-                        
-                        if mem.ppu.current_scanline == 240 {
-                            texture.with_lock(None, |buffer: &mut [u8], pitch: usize| {
-                                for row in 0..240 {
-                                    for col in 0..256 {
-                                        let pixel = mem.ppu.offscreen_buffer[row * 256 + col];
-                                        let offset = row*pitch + col*3;
-                                        buffer[offset + 0] = (pixel >> 16) as u8;
-                                        buffer[offset + 1] = ((pixel >> 8) & 0xff) as u8;
-                                        buffer[offset + 2] = (pixel & 0xff) as u8;
-                                    }
-                                }
-                            }).unwrap();
-                        
-                            renderer.clear();
-                            renderer.copy(&texture, None, Some(Rect::new_unwrap(0, 0, 256, 240)));
-                            renderer.present();
+                        if cpu.tick_count >= TICKS_PER_SCANLINE {
+                            cpu.tick_count -= TICKS_PER_SCANLINE;
                             
-                            for event in event_pump.poll_iter() {
-                                match event {
-                                    Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => 
-                                        break 'gameloop,
-                                    _ => ()
-                                }
+                            let execute_interrupt = mem.ppu.render_scanline(&mut mem.mmu);
+                            if execute_interrupt {
+                                let pc = cpu.pc;
+                                cpu.push_u16(&mut mem, pc);
+                                cpu.push_status(&mut mem);
+                                cpu.pc = mem.mmu.read_u16(&mut mem.ppu, 0xfffa);
                             }
                             
-                            let keys = event_pump.keyboard_state().pressed_scancodes().
-                                filter_map(Keycode::from_scancode).collect();
-                            mem.mmu.joypad.update_keys(keys);
-                            
-                            curr_timer_ticks = timer.ticks();
-                            if (curr_timer_ticks - prev_timer_ticks) < TIMER_TICKS_PER_FRAME {
-                                sleep_ms(TIMER_TICKS_PER_FRAME - (curr_timer_ticks - prev_timer_ticks));
+                            if mem.ppu.current_scanline == 240 {
+                                let exiting = draw_frame_and_pump_events(&mut mem, &mut renderer, &mut texture, &mut event_pump);
+                                if exiting { break 'gameloop_debug }
+                                
+                                curr_timer_ticks = timer.ticks();
+                                if (curr_timer_ticks - prev_timer_ticks) < TIMER_TICKS_PER_FRAME {
+                                    sleep_ms(TIMER_TICKS_PER_FRAME - (curr_timer_ticks - prev_timer_ticks));
+                                }
+                                prev_timer_ticks = curr_timer_ticks;
+                                frame_count += 1;
+    
+                                match cond {
+                                    BreakCondition::RunFrame => cond_met = true,
+                                    BreakCondition::RunUntilFrame(f) => if frame_count == f { cond_met = true; },
+                                    _ => {}
+                                }                            
                             }
-                            prev_timer_ticks = curr_timer_ticks;
-
-                            //output_ppm(&mem.ppu, frame_count);
-                            //println!("Frame: {}", frame_count);
-                            frame_count += 1;
-
-                            match cond {
-                                BreakCondition::RunFrame => cond_met = true,
-                                BreakCondition::RunUntilFrame(f) => if frame_count == f { cond_met = true; },
-                                _ => {}
-                            }                            
+                            
+                            mem.mmu.tick_timer();
                         }
-                        
-                        mem.mmu.tick_timer();
                     }
                 }
             }
         }
     }
-        
+            
     Ok(())
 }
 

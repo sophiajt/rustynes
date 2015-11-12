@@ -1555,8 +1555,16 @@ impl Cpu {
             0xf9 => self.sbc(mem), 
             0xfd => self.sbc(mem), 
             0xfe => self.inc(mem),
-            _ => println!("Error, bad opcode: {0:x}", self.current_opcode)
+            _ => {} //println!("Error, bad opcode: {0:x}", self.current_opcode)
         }    
+    }
+    
+    pub fn run_for_scanline(&mut self, mem: &mut Memory) {        
+        while self.tick_count < TICKS_PER_SCANLINE {
+            self.fetch(mem);
+            self.execute(mem);
+            if self.tick_count >= TICKS_PER_SCANLINE { break; }
+        }
     }
     
     pub fn run_until_condition(&mut self, mem: &mut Memory, break_cond: &BreakCondition) -> bool {

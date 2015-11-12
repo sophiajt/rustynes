@@ -15,13 +15,15 @@ fn main() {
     
     if cmdline_args.len() == 0 {
         println!("Usage: rustynes <filename>");
+        return;
     }
-    else {
-        println!("Loading: {}", &cmdline_args[0]);
-        let result = nes::run_cart(&cmdline_args[0]);
-        match result {
-            Ok(_) => {},
-            Err(_) => println!("File {} is not in .nes ROM format", cmdline_args[0])
-        }
+    
+    let use_debug = (cmdline_args.len() == 2) && (cmdline_args[1] == "--debug"); 
+    
+    println!("Loading: {}", &cmdline_args[0]);
+    let result = nes::run_cart(&cmdline_args[0], use_debug);
+    match result {
+        Ok(_) => {},
+        Err(_) => println!("File {} is not in .nes ROM format", cmdline_args[0])
     }
 }
