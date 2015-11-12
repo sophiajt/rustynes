@@ -1,7 +1,14 @@
+use sdl2;
+use sdl2::pixels::PixelFormatEnum;
+use sdl2::rect::Rect;
+use sdl2::event::Event;
+use sdl2::keyboard::Keycode;
+
 use std::io;
 use std::io::Error;
 use std::io::prelude::*;
 use std::fs::File;
+use std::thread::sleep_ms;
 
 use cpu::{Cpu, BreakCondition};
 use cart::Cart;
@@ -289,6 +296,26 @@ fn print_ppu_addr(mem: &mut Memory, addr1: u16, addr2: u16) {
 
 pub fn run_cart(fname: &String) -> Result<(), io::Error> {
     use std::cmp;
+    
+    let sdl_context = sdl2::init().unwrap();
+    let video_subsystem = sdl_context.video().unwrap();
+
+    let window = video_subsystem.window("rust-sdl2 demo: Video", 256, 240)
+        .position_centered()
+        .opengl()
+        .build()
+        .unwrap();
+
+    let mut renderer = window.renderer().build().unwrap();
+
+    let mut texture = renderer.create_texture_streaming(PixelFormatEnum::RGB24, (256, 240)).unwrap();
+    
+    let mut event_pump = sdl_context.event_pump().unwrap();
+    let mut timer = sdl_context.timer().unwrap();
+    
+    let mut prev_timer_ticks : u32 = timer.ticks();
+    let mut curr_timer_ticks : u32;
+    const TIMER_TICKS_PER_FRAME : u32 = 1000 / 60;
        
     let cart = try!(Cart::load_cart(fname));
     let mut cpu = Cpu::new();
@@ -305,7 +332,7 @@ pub fn run_cart(fname: &String) -> Result<(), io::Error> {
     cpu.reset(&mut mem);
     
     let mut cond_met;
-    loop {
+    'gameloop: loop {
         if show_cpu {
             cpu.fetch(&mut mem);
             debug_info = format!("[{:?}]", cpu);
@@ -347,8 +374,42 @@ pub fn run_cart(fname: &String) -> Result<(), io::Error> {
                         }
                         
                         if mem.ppu.current_scanline == 240 {
+                            texture.with_lock(None, |buffer: &mut [u8], pitch: usize| {
+                                for row in 0..240 {
+                                    for col in 0..256 {
+                                        let pixel = mem.ppu.offscreen_buffer[row * 256 + col];
+                                        let offset = row*pitch + col*3;
+                                        buffer[offset + 0] = (pixel >> 16) as u8;
+                                        buffer[offset + 1] = ((pixel >> 8) & 0xff) as u8;
+                                        buffer[offset + 2] = (pixel & 0xff) as u8;
+                                    }
+                                }
+                            }).unwrap();
+                        
+                            renderer.clear();
+                            renderer.copy(&texture, None, Some(Rect::new_unwrap(0, 0, 256, 240)));
+                            renderer.present();
+                            
+                            for event in event_pump.poll_iter() {
+                                match event {
+                                    Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => 
+                                        break 'gameloop,
+                                    _ => ()
+                                }
+                            }
+                            
+                            let keys = event_pump.keyboard_state().pressed_scancodes().
+                                filter_map(Keycode::from_scancode).collect();
+                            mem.mmu.joypad.update_keys(keys);
+                            
+                            curr_timer_ticks = timer.ticks();
+                            if (curr_timer_ticks - prev_timer_ticks) < TIMER_TICKS_PER_FRAME {
+                                sleep_ms(TIMER_TICKS_PER_FRAME - (curr_timer_ticks - prev_timer_ticks));
+                            }
+                            prev_timer_ticks = curr_timer_ticks;
+
                             //output_ppm(&mem.ppu, frame_count);
-                            println!("Frame: {}", frame_count);
+                            //println!("Frame: {}", frame_count);
                             frame_count += 1;
 
                             match cond {

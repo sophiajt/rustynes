@@ -1,7 +1,6 @@
 use cart::Cart;
 use ppu::Ppu;
-use joypad::{joypad_1_read, joypad_1_write,
-    joypad_2_read, joypad_2_write};
+use joypad::Joypad;
 
 pub mod mirroring {
     pub const HORIZONTAL  : u8 = 1;
@@ -32,6 +31,8 @@ pub struct Mmu {
     map1_prg_switch_area: u8,
     map1_prg_switch_size: u8,
     map1_vrom_switch_size: u8,
+    
+    pub joypad: Joypad,
     
     cart: Cart
 }
@@ -75,6 +76,8 @@ impl Mmu {
             map1_prg_switch_size: 0,
             map1_vrom_switch_size: 0,
             
+            joypad: Joypad::new(),
+            
             cart: cart
         }
     }
@@ -94,7 +97,7 @@ impl Mmu {
         }
     }
     
-    pub fn read_u8(&self, ppu: &mut Ppu, address: u16) -> u8 {
+    pub fn read_u8(&mut self, ppu: &mut Ppu, address: u16) -> u8 {
         match address {
             0x0000...0x07FF => self.scratch_ram[address as usize],
             0x0800...0x0FFF => self.scratch_ram[(address as usize) - 0x0800],
@@ -103,8 +106,8 @@ impl Mmu {
             0x2002          => ppu.status_reg_read(),
             0x2004          => ppu.sprite_ram_io_reg_read(),
             0x2007          => ppu.vram_io_reg_read(self),
-            0x4016          => joypad_1_read(),
-            0x4017          => joypad_2_read(),
+            0x4016          => self.joypad.joypad_1_read(),
+            0x4017          => self.joypad.joypad_2_read(),
             0x6000...0x7FFF => self.save_ram[(address as usize) - 0x6000],
             0x8000...0x8FFF => self.cart.prg_rom[self.active_prg_page[0]][(address as usize) - 0x8000],
             0x9000...0x9FFF => self.cart.prg_rom[self.active_prg_page[1]][(address as usize) - 0x9000],
@@ -118,7 +121,7 @@ impl Mmu {
         }
     }
     
-    pub fn read_u16(&self, ppu: &mut Ppu, address: u16) -> u16 {
+    pub fn read_u16(&mut self, ppu: &mut Ppu, address: u16) -> u16 {
         let read_1 = self.read_u8(ppu, address);
         let read_2 = self.read_u8(ppu, address+1);
         
@@ -138,10 +141,11 @@ impl Mmu {
             0x2005          => ppu.vram_addr_reg_1_write(data),
             0x2006          => ppu.vram_addr_reg_2_write(data),
             0x2007          => ppu.vram_io_reg_write(self, data),
+            0x4000...0x4013 => {}, // Sound signal write 
             0x4014          => ppu.sprite_ram_dma_begin(self, data),
             0x4015          => {}, // Sound signal write
-            0x4016          => joypad_1_write(data),
-            0x4017          => joypad_2_write(data),
+            0x4016          => self.joypad.joypad_1_write(data),
+            0x4017          => self.joypad.joypad_2_write(data),
             0x6000...0x7FFF => 
                 if self.is_save_ram_readonly { 
                     self.save_ram[(address as usize) - 0x6000] = data;

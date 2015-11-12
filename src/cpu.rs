@@ -1584,3 +1584,11 @@ impl Cpu {
         false
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn bcc() {
+       assert!(true); 
+    }
+}

@@ -1,3 +1,5 @@
+extern crate sdl2;
+
 mod util;
 mod cpu;
 mod joypad;
