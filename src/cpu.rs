@@ -1,3 +1,5 @@
+use std::process;
+
 use std::fmt; //for custom Debug
 
 use nes::{Memory, TICKS_PER_SCANLINE};
@@ -55,6 +57,14 @@ impl fmt::Debug for Cpu {
             if self.sign {'N'} else {'-'}, if self.zero { 'Z' } else {'-'}, if self.carry { 'C' } else {'-'}, 
             if self.interrupt {'I'} else {'-'}, if self.decimal {'D'} else {'-'}, if self.overflow {'V'} else {'-'},
             self.tick_count)
+        /*
+        write!(f, "{0:x} A: {1:x} X: {2:x} Y: {3:x} SP: {4:x} PC: {5:x} Flags:{6}{7}{8}{9}{10}{11} Ticks: {12}", 
+            self.current_opcode,
+            self.a, self.x, self.y, self.sp, self.pc, 
+            if self.sign {'N'} else {'-'}, if self.zero { 'Z' } else {'-'}, if self.carry { 'C' } else {'-'}, 
+            if self.interrupt {'I'} else {'-'}, if self.decimal {'D'} else {'-'}, if self.overflow {'V'} else {'-'},
+            self.tick_count)
+        */
     }
 }
 
@@ -272,7 +282,8 @@ impl Cpu {
             if self.carry {1} else {0};
         
         self.carry = total > 0xff;
-        self.overflow = (total & 0x80) != (self.a as u16 & 0x80);
+        //self.overflow = (total & 0x80) != (self.a as u16 & 0x80);
+        self.overflow = total > 0xff;
         self.zero = (total & 0xff) == 0;
         self.sign = (total & 0x80) == 0x80;        
         self.a = (total & 0xff) as u8;
@@ -1091,7 +1102,8 @@ impl Cpu {
             if self.carry {0} else {1};
         
         self.carry = total >= 0;
-        self.overflow = (total & 0x80) != (self.a as i16 & 0x80);
+        //self.overflow = (total & 0x80) != (self.a as i16 & 0x80);
+        self.overflow = total < 0;
         self.zero = (total & 0xff) == 0;
         self.sign = (total & 0x80) == 0x80;        
         self.a = (total & 0xff) as u8;
@@ -1232,6 +1244,7 @@ impl Cpu {
     
     pub fn reset(&mut self, mem: &mut Memory) {
         //reset pc using reset vector
+        //println!("Reset vector: {0:x}", mem.mmu.read_u16(&mut mem.ppu, 0xfffc));
         self.pc = mem.mmu.read_u16(&mut mem.ppu, 0xfffc);
     }
     
@@ -1555,22 +1568,26 @@ impl Cpu {
             0xf9 => self.sbc(mem), 
             0xfd => self.sbc(mem), 
             0xfe => self.inc(mem),
-            _ => {} //println!("Error, bad opcode: {0:x}", self.current_opcode)
+            _ => { println!("Error, bad opcode: {0:x} at {1:04x}", self.current_opcode, self.pc); 
+                process::exit(1);}
         }    
     }
     
     pub fn run_for_scanline(&mut self, mem: &mut Memory) {        
-        while self.tick_count < TICKS_PER_SCANLINE {
+        loop {
             self.fetch(mem);
+            if self.is_debugging {
+                println!("{:?}", self)
+            }                        
             self.execute(mem);
-            if self.tick_count >= TICKS_PER_SCANLINE { break; }
+            if self.tick_count > TICKS_PER_SCANLINE { break; }
         }
     }
     
     pub fn run_until_condition(&mut self, mem: &mut Memory, break_cond: &BreakCondition) -> bool {
         let starting_tick_count = self.tick_count;
         
-        while self.tick_count < TICKS_PER_SCANLINE {
+        while self.tick_count <= TICKS_PER_SCANLINE {
             self.fetch(mem);
             if self.is_debugging {
                 //Print out each step, assuming we're not taking a step (as that will already be visible)

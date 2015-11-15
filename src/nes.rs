@@ -334,7 +334,7 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
 
-    let window = video_subsystem.window("rust-sdl2 demo: Video", 256, 240)
+    let window = video_subsystem.window("rustynes", 256, 240)
         .position_centered()
         .opengl()
         .build()
@@ -386,8 +386,14 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
                 }
                 prev_timer_ticks = curr_timer_ticks;
     
-                frame_count += 1;    
+                frame_count += 1;
             }
+
+            /*
+            if mem.ppu.current_scanline == 0 {
+                println!("Frame count: {}", frame_count); 
+            }
+            */
             
             mem.mmu.tick_timer();
         }

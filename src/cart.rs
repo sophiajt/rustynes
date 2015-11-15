@@ -58,6 +58,11 @@ impl Cart {
             else {
                 (cart_info >> 4) + (mapper_part & 0xf0)
             };
+
+        if !(vec![0, 1, 2].contains(&mapper)) {
+            return Err(Error::new(ErrorKind::InvalidInput, format!("Unsupport mapper: {}", mapper)));
+        }
+
         let mut _unused_buffer = [0; 8];
         try!(f.read(&mut _unused_buffer));
         
@@ -81,6 +86,7 @@ impl Cart {
             }
         }
         
+        /*
         println!("Prg roms: {}", num_prg_pages * 4);
         println!("Chr roms: {}", num_chr_pages * 8);
         println!("Is_vram: {}", is_vram);
@@ -88,7 +94,8 @@ impl Cart {
         println!("Save ram present: {}", save_ram_present);
         println!("Trainer present: {}", trainer_present);
         println!("Mapper: {}", mapper);
-        
+        */
+
         Ok(Cart {
             prg_rom: prg_rom,
             chr_rom: chr_rom,

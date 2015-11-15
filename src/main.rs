@@ -20,10 +20,10 @@ fn main() {
     
     let use_debug = (cmdline_args.len() == 2) && (cmdline_args[1] == "--debug"); 
     
-    println!("Loading: {}", &cmdline_args[0]);
+    //println!("Loading: {}", &cmdline_args[0]);
     let result = nes::run_cart(&cmdline_args[0], use_debug);
     match result {
         Ok(_) => {},
-        Err(_) => println!("File {} is not in .nes ROM format", cmdline_args[0])
+        Err(e) => println!("Error loading: {}.  {}", cmdline_args[0], e)
     }
 }

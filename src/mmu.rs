@@ -45,6 +45,8 @@ impl Mmu {
             active_prg_page.push(x);
             active_chr_page.push(x);
         }
+        //println!("Switch 32k prg page: 0");
+        //println!("Switch 8k chr page: 0");
         
         let scratch_ram : Vec<u8> = vec![0; 0x800];
         
@@ -92,6 +94,10 @@ impl Mmu {
             self.map1_prg_switch_size = 1;
             self.map1_vrom_switch_size = 0;
             
+            let num_prg = self.cart.num_prg_pages;
+            self.switch_16k_prg_page((num_prg - 1) * 4, 1);
+        }
+        else if self.cart.mapper == 2{
             let num_prg = self.cart.num_prg_pages;
             self.switch_16k_prg_page((num_prg - 1) * 4, 1);
         }
@@ -147,7 +153,7 @@ impl Mmu {
             0x4016          => self.joypad.joypad_1_write(data),
             0x4017          => self.joypad.joypad_2_write(data),
             0x6000...0x7FFF => 
-                if self.is_save_ram_readonly { 
+                if !self.is_save_ram_readonly { 
                     self.save_ram[(address as usize) - 0x6000] = data;
                 },
             0x8000...0xFFFF => self.write_prg_rom(address, data),
@@ -208,6 +214,8 @@ impl Mmu {
             _ => {println!("Error: bad 32k switch"); 0}
         };
         
+        //println!("Switch 32k prg page: {}", start_page);
+
         for i in 0..8 {
             self.active_prg_page[i] = start_page + i;
         }
@@ -223,7 +231,7 @@ impl Mmu {
             _ => {println!("Error: bad 16k switch"); 0}
         };
         
-        //println!("Switching 16k prg: {} {}", start_page, area);
+        //println!("Switch 16k prg page: {} {}", start_page, area);
         
         for i in 0..4 {
             self.active_prg_page[4 * area + i] = start_page + i;
@@ -256,6 +264,8 @@ impl Mmu {
             32 => start & 0xff,
             _ => {println!("Error: bad 8k chr switch"); 0}
         };
+
+        //println!("Switch 8k chr page: {}", start);
         
         for i in 0..8 {
             self.active_chr_page[i] = start_page + i;
@@ -271,6 +281,8 @@ impl Mmu {
             32 => start & 0xff,
             _ => {println!("Error: bad 4k chr switch"); 0}
         };
+
+        //println!("Switch 8k chr page: {} {}", start, area);
         
         for i in 0..4 {
             self.active_chr_page[i + 4 * area] = start_page + i;
@@ -308,6 +320,7 @@ impl Mmu {
     */
     
     fn write_prg_rom(&mut self, addr: u16, data: u8) {
+        //println!("Write prg rom: {0:02x} <- {1:x}", addr, data);
         if self.cart.mapper == 1 {
             if (addr >= 0x8000) && (addr <= 0x9fff) {
                 if (data & 0x80) == 0x80 {
@@ -433,6 +446,11 @@ impl Mmu {
                         self.map1_reg_e000_val = 0;
                     }
                 }                    
+            }
+        }
+        else if self.cart.mapper == 2 {
+            if addr >= 0x8000 {
+                self.switch_16k_prg_page(data as usize * 4, 0);
             }
         }
     }
