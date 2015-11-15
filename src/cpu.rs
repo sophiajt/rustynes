@@ -34,7 +34,7 @@ pub struct Cpu {
     //flags
     carry: bool,
     zero: bool,
-    interrupt: bool,
+    pub interrupt: bool,
     decimal: bool,
     brk: bool,
     overflow: bool,

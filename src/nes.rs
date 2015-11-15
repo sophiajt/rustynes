@@ -56,6 +56,44 @@ impl Memory {
 
 pub const TICKS_PER_SCANLINE : u32 = 113;
 
+pub fn tick_timer(cpu: &mut Cpu, mem: &mut Memory) {
+    if mem.ppu.current_scanline < 240 {
+        if mem.mmu.timer_reload_next && mem.mmu.timer_irq_enabled {
+            mem.mmu.timer_irq_count = mem.mmu.timer_irq_reload;
+            mem.mmu.timer_reload_next = false;
+        }
+        else {
+            if mem.mmu.timer_irq_enabled {
+                if mem.mmu.timer_irq_count == 0 {
+                    if mem.mmu.timer_irq_reload > 0 {
+                        let pc = cpu.pc;
+                        cpu.push_u16(mem, pc);
+                        cpu.push_status(mem);
+                        cpu.pc = mem.mmu.read_u16(&mut mem.ppu, 0xfffe);
+                        cpu.interrupt = true;
+                        mem.mmu.timer_irq_enabled = false;
+                    }
+                    else if mem.mmu.timer_zero_pulse {
+                        let pc = cpu.pc;
+                        cpu.push_u16(mem, pc);
+                        cpu.push_status(mem);
+                        cpu.pc = mem.mmu.read_u16(&mut mem.ppu, 0xfffe);
+                        cpu.interrupt = true;
+                        mem.mmu.timer_zero_pulse = false;
+                    }
+                    mem.mmu.timer_reload_next = true;
+                }
+                else {
+                    if mem.ppu.background_visible || mem.ppu.sprites_visible {
+                        mem.mmu.timer_irq_count -= 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 fn configure_ppu_for_cart(ppu: &mut Ppu, cart: &Cart) {
     //Check for workarounds
     ppu.fix_bg_change =
@@ -377,6 +415,10 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
                 cpu.pc = mem.mmu.read_u16(&mut mem.ppu, 0xfffa);
             }
             
+            if mem.mmu.cart.mapper == 4 {
+                tick_timer(&mut cpu, &mut mem);
+            }
+
             if mem.ppu.current_scanline == 240 {
                 let exiting = draw_frame_and_pump_events(&mut mem, &mut renderer, &mut texture, &mut event_pump);
                 if exiting { break 'gameloop }
@@ -394,8 +436,6 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
                 println!("Frame count: {}", frame_count); 
             }
             */
-            
-            mem.mmu.tick_timer();
         }
     }
     else {
@@ -440,6 +480,10 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
                                 cpu.push_status(&mut mem);
                                 cpu.pc = mem.mmu.read_u16(&mut mem.ppu, 0xfffa);
                             }
+
+                            if mem.mmu.cart.mapper == 4 {
+                                tick_timer(&mut cpu, &mut mem);
+                            }
                             
                             if mem.ppu.current_scanline == 240 {
                                 let exiting = draw_frame_and_pump_events(&mut mem, &mut renderer, &mut texture, &mut event_pump);
@@ -458,8 +502,6 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
                                     _ => {}
                                 }                            
                             }
-                            
-                            mem.mmu.tick_timer();
                         }
                     }
                 }

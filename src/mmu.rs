@@ -17,6 +17,8 @@ pub struct Mmu {
     is_save_ram_readonly: bool,
     
     //Mapper-specific registers
+
+    //Mapper 1
     map1_reg_8000_bit: usize,
     map1_reg_a000_bit: usize,
     map1_reg_c000_bit: usize,
@@ -31,10 +33,22 @@ pub struct Mmu {
     map1_prg_switch_area: u8,
     map1_prg_switch_size: u8,
     map1_vrom_switch_size: u8,
+
+    //Mapper 4
+    pub map4_command_number: u8,
+    pub map4_prg_addr_select: u8,
+    pub map4_chr_addr_select: u8,
+    pub timer_irq_enabled: bool,
+    pub timer_reload_next: bool,
+    pub timer_irq_count: u8,
+    pub timer_irq_reload: u8,
+    pub timer_zero_pulse: bool,  //the single pulse timer    
+
+    // Subsystems
     
     pub joypad: Joypad,
     
-    cart: Cart
+    pub cart: Cart
 }
 
 impl Mmu {
@@ -78,6 +92,15 @@ impl Mmu {
             map1_prg_switch_size: 0,
             map1_vrom_switch_size: 0,
             
+            map4_command_number: 0,
+            map4_prg_addr_select: 0,
+            map4_chr_addr_select: 0,
+            timer_irq_enabled: false,
+            timer_reload_next: false,
+            timer_irq_count: 0,
+            timer_irq_reload: 0,
+            timer_zero_pulse: false,
+
             joypad: Joypad::new(),
             
             cart: cart
@@ -101,6 +124,13 @@ impl Mmu {
             let num_prg = self.cart.num_prg_pages;
             self.switch_16k_prg_page((num_prg - 1) * 4, 1);
         }
+        else if self.cart.mapper == 4 {
+            self.map4_prg_addr_select = 0;
+            self.map4_chr_addr_select = 0;
+            self.timer_zero_pulse = false;
+            let num_prg = self.cart.num_prg_pages;            
+            self.switch_16k_prg_page((num_prg - 1) * 4, 1);
+        }
     }
     
     pub fn read_u8(&mut self, ppu: &mut Ppu, address: u16) -> u8 {
@@ -112,6 +142,7 @@ impl Mmu {
             0x2002          => ppu.status_reg_read(),
             0x2004          => ppu.sprite_ram_io_reg_read(),
             0x2007          => ppu.vram_io_reg_read(self),
+            0x4015          => 0, //ignored read
             0x4016          => self.joypad.joypad_1_read(),
             0x4017          => self.joypad.joypad_2_read(),
             0x6000...0x7FFF => self.save_ram[(address as usize) - 0x6000],
@@ -238,7 +269,6 @@ impl Mmu {
         }
     }
     
-    /*
     fn switch_8k_prg_page(&mut self, start: usize, area: usize) {
         let start_page = match self.cart.num_prg_pages {
             2 => start & 0x7,
@@ -253,7 +283,6 @@ impl Mmu {
             self.active_prg_page[i + 2 * area] = start_page + i;
         }
     }
-    */
     
     fn switch_8k_chr_page(&mut self, start: usize) {
         let start_page = match self.cart.num_chr_pages {
@@ -289,7 +318,6 @@ impl Mmu {
         }              
     }
     
-    /*
     fn switch_2k_chr_page(&mut self, start: usize, area: usize) {
         let start_page = match self.cart.num_chr_pages {
             2 => start & 0xf,
@@ -317,7 +345,6 @@ impl Mmu {
         
         self.active_chr_page[area] = start_page;              
     }
-    */
     
     fn write_prg_rom(&mut self, addr: u16, data: u8) {
         //println!("Write prg rom: {0:02x} <- {1:x}", addr, data);
@@ -453,6 +480,127 @@ impl Mmu {
                 self.switch_16k_prg_page(data as usize * 4, 0);
             }
         }
+        else if self.cart.mapper == 3 {
+            if addr >= 0x8000 {
+                self.switch_8k_chr_page(data as usize * 8);
+            }
+        }
+        else if self.cart.mapper == 4 {
+            if addr == 0x8000 {
+                self.map4_command_number = data & 0x7;
+                self.map4_prg_addr_select = data & 0x40;
+                self.map4_chr_addr_select = data & 0x80;
+            }
+            else if addr == 0x8001 {
+                if self.map4_command_number == 0 {
+                    let new_data = data - (data % 2);
+
+                    if self.map4_chr_addr_select == 0 {
+                        self.switch_2k_chr_page(new_data as usize, 0);
+                    }
+                    else {                        
+                        self.switch_2k_chr_page(new_data as usize, 2);
+                    }
+                }
+                else if self.map4_command_number == 1 {
+                    let new_data = data - (data % 2);
+
+                    if self.map4_chr_addr_select == 0 {
+                        self.switch_2k_chr_page(new_data as usize, 1);
+                    }
+                    else {                        
+                        self.switch_2k_chr_page(new_data as usize, 3);
+                    }
+                }
+                else if self.map4_command_number == 2 {
+                    let new_data = data & ((self.cart.num_chr_pages * 8 - 1) as u8);
+                    if self.map4_chr_addr_select == 0 {
+                        self.switch_1k_chr_page(new_data as usize, 4);
+                    }
+                    else {
+                        self.switch_1k_chr_page(new_data as usize, 0);
+                    }
+                }
+                else if self.map4_command_number == 3 {
+                    if self.map4_chr_addr_select == 0 {
+                        self.switch_1k_chr_page(data as usize, 5);
+                    }
+                    else {
+                        self.switch_1k_chr_page(data as usize, 1);
+                    }                    
+                }
+                else if self.map4_command_number == 4 {
+                    if self.map4_chr_addr_select == 0 {
+                        self.switch_1k_chr_page(data as usize, 6);
+                    }
+                    else {
+                        self.switch_1k_chr_page(data as usize, 2);
+                    }                    
+
+                }
+                else if self.map4_command_number == 5 {
+                    if self.map4_chr_addr_select == 0 {
+                        self.switch_1k_chr_page(data as usize, 7);
+                    }
+                    else {
+                        self.switch_1k_chr_page(data as usize, 3);
+                    }                    
+                }
+                else if self.map4_command_number == 6 {
+                    let num_pages = self.cart.num_prg_pages;
+                    if self.map4_prg_addr_select == 0 {
+                        self.switch_8k_prg_page(data as usize * 2, 0);
+                        self.switch_8k_prg_page(num_pages * 4 - 4, 2);
+                    }
+                    else {
+                        self.switch_8k_prg_page(data as usize * 2, 2);
+                        self.switch_8k_prg_page(num_pages * 4 - 4, 0);
+                    }
+                }
+                else if self.map4_command_number == 7 {
+                    let num_pages = self.cart.num_prg_pages;
+                    self.switch_8k_prg_page(data as usize * 2, 1);
+                    if self.map4_prg_addr_select == 0 {
+                        self.switch_8k_prg_page(num_pages * 4 - 4, 2);
+                    }
+                    else {
+                        self.switch_8k_prg_page(num_pages * 4 - 4, 0);
+                    }
+                }
+            }
+            else if addr == 0xa000 {
+                if (data & 1) == 1 {
+                    self.cart.mirroring = mirroring::HORIZONTAL;
+                }
+                else {
+                    self.cart.mirroring = mirroring::VERTICAL;
+                }
+            }
+            else if addr == 0xa001 {
+                if data == 0 {
+                    self.is_save_ram_readonly = true;
+                }
+                else {
+                    self.is_save_ram_readonly = false;
+                }
+            }
+            else if addr == 0xc000 {
+                self.timer_irq_reload = data;
+                if data == 0 {
+                    self.timer_zero_pulse = true;
+                }
+                self.timer_reload_next = true;
+            }
+            else if addr == 0xc001 {
+                self.timer_irq_count = 0;
+            }
+            else if addr == 0xe000 {
+                self.timer_irq_enabled = false;
+            }
+            else if addr == 0xe001 {
+                self.timer_irq_enabled = true;
+            }
+        }
     }
         
     pub fn mirroring(&self) -> u8 {
@@ -463,7 +611,4 @@ impl Mmu {
         self.cart.mirroring_base
     }
     
-    pub fn tick_timer(&mut self) {
-        //TODO
-    }
 }

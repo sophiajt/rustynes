@@ -59,7 +59,7 @@ impl Cart {
                 (cart_info >> 4) + (mapper_part & 0xf0)
             };
 
-        if !(vec![0, 1, 2].contains(&mapper)) {
+        if !(vec![0, 1, 2, 3, 4].contains(&mapper)) {
             return Err(Error::new(ErrorKind::InvalidInput, format!("Unsupport mapper: {}", mapper)));
         }
 

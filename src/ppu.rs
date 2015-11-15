@@ -40,8 +40,8 @@ pub struct Ppu {
     monochrome_display: bool,
     no_background_clipping: bool,
     no_sprite_clipping: bool,
-    background_visible: bool,
-    sprites_visible: bool,
+    pub background_visible: bool,
+    pub sprites_visible: bool,
     
     ppu_color: i32,
     
@@ -646,13 +646,6 @@ impl Ppu {
                 
         self.current_scanline += 1;
 
-/*
-        if self.current_scanline == 240 {
-            println!("--------------------------------------");
-            println!("             VBLANK");
-            println!("--------------------------------------");
-        }
-*/
         
         if self.fix_scroll_offset_1 {
             if self.current_scanline > 244 {
