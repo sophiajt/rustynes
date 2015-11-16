@@ -15,6 +15,9 @@ use cart::Cart;
 use ppu::Ppu;
 use mmu::Mmu;
 
+const VISIBLE_WIDTH: u32 = 256;
+const VISIBLE_HEIGHT: u32 = 240;
+
 #[derive(Clone)]
 enum DebuggerCommand {
     RunCpuUntil(BreakCondition),
@@ -336,19 +339,33 @@ fn draw_frame_and_pump_events(mem: &mut Memory, renderer: &mut sdl2::render::Ren
     event_pump: &mut sdl2::EventPump) -> bool {
     
     texture.with_lock(None, |buffer: &mut [u8], pitch: usize| {
-        for row in 0..240 {
-            for col in 0..256 {
+        for row in 0..(VISIBLE_HEIGHT as usize) {
+            for col in 0..(VISIBLE_WIDTH as usize) {
                 let pixel = mem.ppu.offscreen_buffer[row * 256 + col];
-                let offset = row*pitch + col*3;
-                buffer[offset + 0] = (pixel >> 16) as u8;
-                buffer[offset + 1] = ((pixel >> 8) & 0xff) as u8;
-                buffer[offset + 2] = (pixel & 0xff) as u8;
+                let offset = row*pitch*2 + col*3*2;
+
+                let red = (pixel >> 16) as u8;
+                let green = ((pixel >> 8) & 0xff) as u8;
+                let blue = (pixel & 0xff) as u8;
+
+                buffer[offset + 0] = red;
+                buffer[offset + 3] = red;
+                buffer[offset + pitch] = red;
+                buffer[offset + pitch + 3] = red;
+                buffer[offset + 1] = green;
+                buffer[offset + 4] = green;
+                buffer[offset + pitch + 1] = green;
+                buffer[offset + pitch + 4] = green;
+                buffer[offset + 2] = blue;
+                buffer[offset + 5] = blue;
+                buffer[offset + pitch + 2] = blue;
+                buffer[offset + pitch + 5] = blue;
             }
         }
     }).unwrap();
 
     renderer.clear();
-    renderer.copy(&texture, None, Some(Rect::new_unwrap(0, 0, 256, 240)));
+    renderer.copy(&texture, None, Some(Rect::new_unwrap(0, 0, VISIBLE_WIDTH * 2, VISIBLE_HEIGHT * 2)));
     renderer.present();
     
     for event in event_pump.poll_iter() {
@@ -372,7 +389,7 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
 
-    let window = video_subsystem.window("rustynes", 256, 240)
+    let window = video_subsystem.window("rustynes", VISIBLE_WIDTH*2, VISIBLE_HEIGHT*2)
         .position_centered()
         .opengl()
         .build()
@@ -380,7 +397,7 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
 
     let mut renderer = window.renderer().build().unwrap();
 
-    let mut texture = renderer.create_texture_streaming(PixelFormatEnum::RGB24, (256, 240)).unwrap();
+    let mut texture = renderer.create_texture_streaming(PixelFormatEnum::RGB24, (VISIBLE_WIDTH * 2, VISIBLE_HEIGHT * 2)).unwrap();
     
     let mut event_pump = sdl_context.event_pump().unwrap();
     let mut timer = sdl_context.timer().unwrap();
@@ -430,12 +447,6 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
     
                 frame_count += 1;
             }
-
-            /*
-            if mem.ppu.current_scanline == 0 {
-                println!("Frame count: {}", frame_count); 
-            }
-            */
         }
     }
     else {

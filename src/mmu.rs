@@ -576,6 +576,7 @@ impl Mmu {
                     self.cart.mirroring = mirroring::VERTICAL;
                 }
             }
+            /*
             else if addr == 0xa001 {
                 if data == 0 {
                     self.is_save_ram_readonly = true;
@@ -584,6 +585,8 @@ impl Mmu {
                     self.is_save_ram_readonly = false;
                 }
             }
+            */
+            else if addr == 0xa001 {}
             else if addr == 0xc000 {
                 self.timer_irq_reload = data;
                 if data == 0 {
@@ -599,6 +602,9 @@ impl Mmu {
             }
             else if addr == 0xe001 {
                 self.timer_irq_enabled = true;
+            }
+            else {
+                println!("Unknown prg write: {0:04x}", addr);
             }
         }
     }
