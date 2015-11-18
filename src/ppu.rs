@@ -1,19 +1,11 @@
 use std::fmt; //for custom Debug
 
-use mmu::{Mmu, mirroring};
-
-/*
-const NES_PALETTE : [u16; 64] = [
-	    0x8410, 0x17, 0x3017, 0x8014, 0xb80d, 0xb003, 0xb000, 0x9120,
-	    0x7940, 0x1e0, 0x241, 0x1e4, 0x16c, 0x0, 0x20, 0x20,
-	    0xce59, 0x2df, 0x41ff, 0xb199, 0xf995, 0xf9ab, 0xf9a3, 0xd240,
-	    0xc300, 0x3bc0, 0x1c22, 0x4ac, 0x438, 0x1082, 0x841, 0x841,
-	    0xffff, 0x4bf, 0x6c3f, 0xd37f, 0xfbb9, 0xfb73, 0xfbcb, 0xfc8b,
-	    0xfd06, 0xa5e0, 0x56cd, 0x4eb5, 0x6df, 0x632c, 0x861, 0x861,
-	    0xffff, 0x85ff, 0xbddf, 0xd5df, 0xfdfd, 0xfdf9, 0xfe36, 0xfe75,
-	    0xfed4, 0xcf13, 0xaf76, 0xafbd, 0xb77f, 0xdefb, 0x1082, 0x1082
-   ];
-*/
+pub mod mirroring {
+    pub const HORIZONTAL  : u8 = 1;
+    pub const VERTICAL    : u8 = 2;
+    pub const FOUR_SCREEN : u8 = 3;
+    pub const ONE_SCREEN  : u8 = 4;
+}
 
 const NES_PALETTE : [u32; 64] = [
     0x808080, 0x0000BB, 0x3700BF, 0x8400A6, 0xBB006A, 0xB7001E, 0xB30000, 0x912600,
@@ -59,18 +51,28 @@ pub struct Ppu {
     pub current_scanline: usize,
     pub name_tables: Vec<u8>,
     
-    sprite_ram: Vec<u8>,
+    pub sprite_ram: Vec<u8>,
     sprite_ram_address: usize,
     sprites_crossed: i32,
     
     pub offscreen_buffer: Vec<BitsPerPixel>,
+
+    //From cart
+    pub chr_rom : Vec<Vec<u8>>,
+    pub mirroring: u8,
+    pub mirroring_base: usize, 
+    pub is_vram: bool,
+    pub mapper: u8,
+    pub num_chr_pages: usize,
+
+    pub active_chr_page: Vec<usize>,
 
     //workarounds
     pub fix_scroll_offset_1: bool,
     pub fix_scroll_offset_2: bool,
     pub fix_scroll_offset_3: bool,
     pub fix_bg_change: bool,
-    pub fix_scroll_reset: bool            
+    pub fix_scroll_reset: bool,
 }
 
 impl fmt::Debug for Ppu {
@@ -89,6 +91,11 @@ impl fmt::Debug for Ppu {
 
 impl Ppu {
     pub fn new() -> Ppu {
+        let mut active_chr_page: Vec<usize> = Vec::new();
+        for x in 0..8 {
+            active_chr_page.push(x);
+        }
+
         Ppu {
             execute_nmi_on_vblank: false,
             ppu_master: 0xff,
@@ -121,7 +128,14 @@ impl Ppu {
             name_tables: vec![0; 0x2000],
             sprite_ram: vec![0; 0x100],
             offscreen_buffer: vec![0; 256*240],
-            sprite_0_buffer: vec![0; 256]            
+            sprite_0_buffer: vec![0; 256],
+            chr_rom : Vec::new(),
+            mirroring: mirroring::HORIZONTAL,
+            mirroring_base: 0, 
+            is_vram: false,
+            mapper: 0,
+            num_chr_pages: 0,
+            active_chr_page: active_chr_page
         }
     }
     
@@ -233,12 +247,13 @@ impl Ppu {
         }
     }
     
-    pub fn vram_io_reg_write(&mut self, mmu: &mut Mmu, data: u8) {
+    pub fn vram_io_reg_write(&mut self, data: u8) {
         if self.vram_rw_addr < 0x2000 {
-            mmu.write_chr_rom(self.vram_rw_addr, data);
+            let vram_rw_addr = self.vram_rw_addr;
+            self.write_chr_rom(vram_rw_addr, data);
         }
         else if (self.vram_rw_addr >= 0x2000) && (self.vram_rw_addr < 0x3f00) {
-            match mmu.mirroring() {
+            match self.mirroring {
                 mirroring::HORIZONTAL => {
                     match self.vram_rw_addr & 0x2c00 {
                         0x2000 => self.name_tables[self.vram_rw_addr - 0x2000] = data,
@@ -258,7 +273,7 @@ impl Ppu {
                     }
                 },
                 mirroring::ONE_SCREEN => {
-                    if mmu.mirroring_base() == 0x2000 {
+                    if self.mirroring_base == 0x2000 {
                         match self.vram_rw_addr & 0x2c00 {
                             0x2000 => self.name_tables[self.vram_rw_addr - 0x2000] = data,
                             0x2400 => self.name_tables[self.vram_rw_addr - 0x2400] = data,
@@ -267,7 +282,7 @@ impl Ppu {
                             _ => println!("Unknown VRAM write: {0:04x}", self.vram_rw_addr)
                         }
                     }
-                    else if mmu.mirroring_base() == 0x2400 {
+                    else if self.mirroring_base == 0x2400 {
                         match self.vram_rw_addr & 0x2c00 {
                             0x2000 => self.name_tables[self.vram_rw_addr + 0x400 - 0x2000] = data,
                             0x2400 => self.name_tables[self.vram_rw_addr - 0x2000] = data,
@@ -289,7 +304,7 @@ impl Ppu {
         self.vram_rw_addr += self.ppu_address_increment;
     }
     
-    pub fn vram_io_reg_read(&mut self, mmu: &Mmu) -> u8 {
+    pub fn vram_io_reg_read(&mut self) -> u8 {
         let mut result = 0;
         
         if self.vram_rw_addr < 0x3f00 {
@@ -299,7 +314,7 @@ impl Ppu {
                 self.vram_read_buffer = self.name_tables[self.vram_rw_addr - 0x2000];                
             }
             else {
-                self.vram_read_buffer = mmu.read_chr_rom(self.vram_rw_addr);
+                self.vram_read_buffer = self.read_chr_rom(self.vram_rw_addr);
             }
         }
         else if self.vram_rw_addr >= 0x4000 {
@@ -328,16 +343,51 @@ impl Ppu {
     pub fn sprite_ram_io_reg_read(&self) -> u8 {
         self.sprite_ram[self.sprite_ram_address]
     }
-    
-    pub fn sprite_ram_dma_begin(&mut self, mmu: &mut Mmu, data: u8) {
-        //println!("Sprite RAM DMA from 0x{0:x}", (data as u16) * 0x100);
-        for i in 0..256 {
-            self.sprite_ram[i] = mmu.read_u8(self, (data as u16) * 0x100 + i as u16);
+
+    pub fn write_chr_rom(&mut self, addr: usize, data:u8) {
+        if self.is_vram {
+            match addr {
+                0x0000...0x03ff => self.chr_rom[self.active_chr_page[0]][addr] = data,
+                0x0400...0x07ff => self.chr_rom[self.active_chr_page[1]][addr - 0x400] = data,
+                0x0800...0x0bff => self.chr_rom[self.active_chr_page[2]][addr - 0x800] = data,
+                0x0c00...0x0fff => self.chr_rom[self.active_chr_page[3]][addr - 0xc00] = data,
+                0x1000...0x13ff => self.chr_rom[self.active_chr_page[4]][addr - 0x1000] = data,
+                0x1400...0x17ff => self.chr_rom[self.active_chr_page[5]][addr - 0x1400] = data,
+                0x1800...0x1bff => self.chr_rom[self.active_chr_page[6]][addr - 0x1800] = data,
+                0x1c00...0x1fff => self.chr_rom[self.active_chr_page[7]][addr - 0x1c00] = data,
+                _ => {}
+            }
         }
-        //println!("{:?}", self.sprite_ram);
     }
     
-    fn render_background(&mut self, mmu: &mut Mmu) {
+    pub fn read_chr_rom(&self, addr: usize) -> u8 {
+        if addr < 0x400 {
+            return self.chr_rom[self.active_chr_page[0]][addr];
+        }
+        else if addr < 0x800 {
+            return self.chr_rom[self.active_chr_page[1]][addr - 0x400];
+        }
+        else if addr < 0xc00 {
+            return self.chr_rom[self.active_chr_page[2]][addr - 0x800];
+        }
+        else if addr < 0x1000 {
+            return self.chr_rom[self.active_chr_page[3]][addr - 0xc00];
+        }
+        else if addr < 0x1400 {
+            return self.chr_rom[self.active_chr_page[4]][addr - 0x1000];
+        }
+        else if addr < 0x1800 {
+            return self.chr_rom[self.active_chr_page[5]][addr - 0x1400];
+        }
+        else if addr < 0x1c00 {
+            return self.chr_rom[self.active_chr_page[6]][addr - 0x1800];
+        }
+        else {
+            return self.chr_rom[self.active_chr_page[7]][addr - 0x1c00];
+        }
+    }
+    
+    fn render_background(&mut self) {
         let mut start_column;
         let mut end_column;
         
@@ -387,7 +437,7 @@ impl Ppu {
                 end_column = self.scroll_v / 8 + 1;
             }
             
-            match mmu.mirroring() {
+            match self.mirroring {
                 mirroring::HORIZONTAL => {
                     match name_table_base {
                         0x2400 => name_table_base = 0x2000,
@@ -404,7 +454,7 @@ impl Ppu {
                     }
                 },
                 mirroring::ONE_SCREEN => {
-                    name_table_base = mmu.mirroring_base();
+                    name_table_base = self.mirroring_base;
                 },
                 _ => {}
             }
@@ -420,8 +470,8 @@ impl Ppu {
                 
                 let tile_data_offset = self.background_address + (tile_num as usize) * 16;
                 
-                let tile_data_1 = mmu.read_chr_rom(tile_data_offset + tile_offset);
-                let tile_data_2 = mmu.read_chr_rom(tile_data_offset + tile_offset + 8);
+                let tile_data_1 = self.read_chr_rom(tile_data_offset + tile_offset);
+                let tile_data_2 = self.read_chr_rom(tile_data_offset + tile_offset + 8);
                     
                 // next, calculate where to go in the palette table
                 
@@ -473,7 +523,7 @@ impl Ppu {
         }
     }
     
-    fn render_sprites(&mut self, mmu: &mut Mmu, behind: u8) {
+    fn render_sprites(&mut self, behind: u8) {
         let mut i : usize = 252;
         
         loop {
@@ -498,8 +548,8 @@ impl Ppu {
                     let offset_to_sprite : usize = self.sprite_address + 
                         (((self.sprite_ram[i+1] as usize) * 16) as usize);
                     
-                    let tile_data_1 = mmu.read_chr_rom(offset_to_sprite + sprite_line_to_draw);
-                    let tile_data_2 = mmu.read_chr_rom(offset_to_sprite + sprite_line_to_draw + 8);
+                    let tile_data_1 = self.read_chr_rom(offset_to_sprite + sprite_line_to_draw);
+                    let tile_data_2 = self.read_chr_rom(offset_to_sprite + sprite_line_to_draw + 8);
                     
                     let palette_high_bits = (self.sprite_ram[i+2] & 0x3) << 2;
                     
@@ -562,8 +612,8 @@ impl Ppu {
                         }
                     }
                     
-                    let tile_data_1 = mmu.read_chr_rom(offset_to_sprite + sprite_line_to_draw);
-                    let tile_data_2 = mmu.read_chr_rom(offset_to_sprite + sprite_line_to_draw + 8);
+                    let tile_data_1 = self.read_chr_rom(offset_to_sprite + sprite_line_to_draw);
+                    let tile_data_2 = self.read_chr_rom(offset_to_sprite + sprite_line_to_draw + 8);
                                         
                     let palette_high_bits = (self.sprite_ram[i+2] & 0x3) << 2;
                     
@@ -596,7 +646,7 @@ impl Ppu {
         }
     }
     
-    pub fn render_scanline(&mut self, mmu: &mut Mmu) -> bool {
+    pub fn render_scanline(&mut self) -> bool {
         if self.current_scanline < 234 {
             if self.name_tables[0x1f00] > 63 {
                 for i in 0..256 {
@@ -614,15 +664,15 @@ impl Ppu {
             self.sprites_crossed = 0;
             
             if self.sprites_visible {
-                self.render_sprites(mmu, 0x20);
+                self.render_sprites(0x20);
             }
             
             if self.background_visible {
-                self.render_background(mmu);
+                self.render_background();
             }
             
             if self.sprites_visible {
-                self.render_sprites(mmu, 0);
+                self.render_sprites(0);
             }
             
             if !self.sprite_0_hit {            
@@ -640,18 +690,7 @@ impl Ppu {
             }
         }
 
-        if self.current_scanline == 240 {            
-            // do nothing, but later, add video and events?
-        }
-                
         self.current_scanline += 1;
-
-        
-        if self.fix_scroll_offset_1 {
-            if self.current_scanline > 244 {
-                //self.sprite_0_hit = false;
-            }
-        }
         
         if self.current_scanline > 262 {
             self.current_scanline = 0;

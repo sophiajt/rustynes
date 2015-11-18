@@ -11,7 +11,7 @@ use std::fs::File;
 use std::thread::sleep_ms;
 
 use cpu::{Cpu, BreakCondition};
-use cart::Cart;
+use cart::load_cart;
 use ppu::Ppu;
 use mmu::Mmu;
 
@@ -32,120 +32,43 @@ enum DebuggerCommand {
     Quit
 }
 
-// Everything we need to read and write from memory
-pub struct Memory {
-    pub ppu: Ppu,
-    pub mmu: Mmu
-}
-
-impl Memory {
-    pub fn new(cart: Cart) -> Memory {
-        let mut ppu = Ppu::new();
-
-        //Add in our workarounds first
-        configure_ppu_for_cart(&mut ppu, &cart);
-    
-        //Then hand off cart, after this the MMU is the only one
-        //who can access program memory
-        let mut mmu = Mmu::new(cart);
-        
-        //Before we're done, we also have to reset our mapper to 
-        //its default
-        mmu.setup_defaults();
-        
-        Memory { ppu: ppu, mmu: mmu }
-    }
-}
-
 pub const TICKS_PER_SCANLINE : u32 = 113;
 
-pub fn tick_timer(cpu: &mut Cpu, mem: &mut Memory) {
-    if mem.ppu.current_scanline < 240 {
-        if mem.mmu.timer_reload_next && mem.mmu.timer_irq_enabled {
-            mem.mmu.timer_irq_count = mem.mmu.timer_irq_reload;
-            mem.mmu.timer_reload_next = false;
+pub fn tick_timer(cpu: &mut Cpu, mmu: &mut Mmu) {
+    if mmu.ppu.current_scanline < 240 {
+        if mmu.timer_reload_next && mmu.timer_irq_enabled {
+            mmu.timer_irq_count = mmu.timer_irq_reload;
+            mmu.timer_reload_next = false;
         }
         else {
-            if mem.mmu.timer_irq_enabled {
-                if mem.mmu.timer_irq_count == 0 {
-                    if mem.mmu.timer_irq_reload > 0 {
+            if mmu.timer_irq_enabled {
+                if mmu.timer_irq_count == 0 {
+                    if mmu.timer_irq_reload > 0 {
                         let pc = cpu.pc;
-                        cpu.push_u16(mem, pc);
-                        cpu.push_status(mem);
-                        cpu.pc = mem.mmu.read_u16(&mut mem.ppu, 0xfffe);
+                        cpu.push_u16(mmu, pc);
+                        cpu.push_status(mmu);
+                        cpu.pc = mmu.read_u16(0xfffe);
                         cpu.interrupt = true;
-                        mem.mmu.timer_irq_enabled = false;
+                        mmu.timer_irq_enabled = false;
                     }
-                    else if mem.mmu.timer_zero_pulse {
+                    else if mmu.timer_zero_pulse {
                         let pc = cpu.pc;
-                        cpu.push_u16(mem, pc);
-                        cpu.push_status(mem);
-                        cpu.pc = mem.mmu.read_u16(&mut mem.ppu, 0xfffe);
+                        cpu.push_u16(mmu, pc);
+                        cpu.push_status(mmu);
+                        cpu.pc = mmu.read_u16(0xfffe);
                         cpu.interrupt = true;
-                        mem.mmu.timer_zero_pulse = false;
+                        mmu.timer_zero_pulse = false;
                     }
-                    mem.mmu.timer_reload_next = true;
+                    mmu.timer_reload_next = true;
                 }
                 else {
-                    if mem.ppu.background_visible || mem.ppu.sprites_visible {
-                        mem.mmu.timer_irq_count -= 1;
+                    if mmu.ppu.background_visible || mmu.ppu.sprites_visible {
+                        mmu.timer_irq_count -= 1;
                     }
                 }
             }
         }
     }
-}
-
-
-fn configure_ppu_for_cart(ppu: &mut Ppu, cart: &Cart) {
-    //Check for workarounds
-    ppu.fix_bg_change =
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfeb] == b'Z') &&
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfec] == b'E') &&
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfed] == b'L') &&
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfee] == b'D') &&
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfef] == b'A');
-    
-    ppu.fix_scroll_offset_1 =
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfe0] == b'B') &&
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfe1] == b'B') &&
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfe2] == b'4') &&
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfe3] == b'7') &&
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfe4] == b'9') &&
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfe5] == b'5') &&
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfe6] == b'6') &&
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfe7] == b'-') &&
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfe8] == b'1') &&
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfe9] == b'5') &&
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfea] == b'4') &&
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfeb] == b'4') &&
-        (cart.prg_rom[cart.num_prg_pages - 1][0xfec] == b'0');
-        
-    ppu.fix_scroll_offset_2 = 
-        (cart.prg_rom[0][0x9] == 0xfc) &&
-        (cart.prg_rom[0][0xa] == 0xfc) &&
-        (cart.prg_rom[0][0xb] == 0xfc) &&
-        (cart.prg_rom[0][0xc] == 0x40) &&
-        (cart.prg_rom[0][0xd] == 0x40) &&
-        (cart.prg_rom[0][0xe] == 0x40) &&
-        (cart.prg_rom[0][0xf] == 0x40);
-        
-    ppu.fix_scroll_offset_3 = 
-        (cart.prg_rom[0][0x75] == 0x11) &&
-        (cart.prg_rom[0][0x76] == 0x12) &&
-        (cart.prg_rom[0][0x77] == 0x13) &&
-        (cart.prg_rom[0][0x78] == 0x14) &&
-        (cart.prg_rom[0][0x79] == 0x07) && 
-        (cart.prg_rom[0][0x7a] == 0x03) && 
-        (cart.prg_rom[0][0x7b] == 0x03) && 
-        (cart.prg_rom[0][0x7c] == 0x03) && 
-        (cart.prg_rom[0][0x7d] == 0x03);  
-    
-    ppu.fix_scroll_reset = 
-        (cart.prg_rom[0][0xfeb - 0x10] == 0xFA) &&
-        (cart.prg_rom[0][0xfec - 0x10] == 0xA9) &&
-        (cart.prg_rom[0][0xfed - 0x10] == 0x18);
-        
 }
 
 pub fn output_ppm(ppu: &Ppu, frame: usize) -> Result<(), io::Error> {
@@ -287,14 +210,14 @@ fn prompt(prev_command: DebuggerCommand, info: &String) -> Result<DebuggerComman
     }
 }
 
-fn print_addr(mem: &mut Memory, addr1: u16, addr2: u16) {
+fn print_addr(mmu: &mut Mmu, addr1: u16, addr2: u16) {
     let mut idx = 0;
     
     loop {
         if idx % 16 == 0 {
             print!("{0:04x}: ", addr1 + idx);
         }
-        print!("{0:02x} ", mem.mmu.read_u8(&mut mem.ppu, addr1 + idx));
+        print!("{0:02x} ", mmu.read_u8(addr1 + idx));
         
         if (addr1 + idx) == addr2 {
             break;
@@ -309,7 +232,7 @@ fn print_addr(mem: &mut Memory, addr1: u16, addr2: u16) {
     println!("");
 }
 
-fn print_ppu_addr(mem: &mut Memory, addr1: u16, addr2: u16) {
+fn print_ppu_addr(mmu: &mut Mmu, addr1: u16, addr2: u16) {
     let mut idx = 0;
     
     loop {
@@ -317,10 +240,10 @@ fn print_ppu_addr(mem: &mut Memory, addr1: u16, addr2: u16) {
             print!("{0:04x}: ", addr1 + idx);
         }
         if ((addr1 + idx) >= 0x2000) && ((addr1 + idx) < 0x4000) {
-            print!("{0:02x} ", mem.ppu.name_tables[(addr1 as usize) - 0x2000 + (idx as usize)]);
+            print!("{0:02x} ", mmu.ppu.name_tables[(addr1 as usize) - 0x2000 + (idx as usize)]);
         }
         else if (addr1 + idx) < 0x2000 {
-            print!("{0:02x} ", mem.mmu.read_chr_rom((addr1 as usize) + (idx as usize)));
+            print!("{0:02x} ", mmu.ppu.read_chr_rom((addr1 as usize) + (idx as usize)));
         }
         if (addr1 + idx) == addr2 {
             break;
@@ -335,13 +258,13 @@ fn print_ppu_addr(mem: &mut Memory, addr1: u16, addr2: u16) {
     println!("");
 }
 
-fn draw_frame_and_pump_events(mem: &mut Memory, renderer: &mut sdl2::render::Renderer, texture: &mut sdl2::render::Texture,
+fn draw_frame_and_pump_events(mmu: &mut Mmu, renderer: &mut sdl2::render::Renderer, texture: &mut sdl2::render::Texture,
     event_pump: &mut sdl2::EventPump) -> bool {
     
     texture.with_lock(None, |buffer: &mut [u8], pitch: usize| {
         for row in 0..(VISIBLE_HEIGHT as usize) {
             for col in 0..(VISIBLE_WIDTH as usize) {
-                let pixel = mem.ppu.offscreen_buffer[row * 256 + col];
+                let pixel = mmu.ppu.offscreen_buffer[row * 256 + col];
                 let offset = row*pitch*2 + col*3*2;
 
                 let red = (pixel >> 16) as u8;
@@ -378,7 +301,8 @@ fn draw_frame_and_pump_events(mem: &mut Memory, renderer: &mut sdl2::render::Ren
     
     let keys = event_pump.keyboard_state().pressed_scancodes().
         filter_map(Keycode::from_scancode).collect();
-    mem.mmu.joypad.update_keys(keys);
+
+    mmu.joypad.update_keys(keys);
     
     false
 }
@@ -405,8 +329,10 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
     let mut prev_timer_ticks : u32 = timer.ticks();
     let mut curr_timer_ticks : u32;
     const TIMER_TICKS_PER_FRAME : u32 = 1000 / 60;
-       
-    let cart = try!(Cart::load_cart(fname));
+    
+    let mut mmu = Mmu::new();
+    try!(load_cart(fname, &mut mmu));
+
     let mut cpu = Cpu::new();
     let mut frame_count = 0;
     let mut debug_info : String;
@@ -416,28 +342,27 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
 
     //Create all our memory handlers, and hand off ownership
     //of the cart to contained mmu
-    let mut mem = Memory::new(cart);
     
-    cpu.reset(&mut mem);
+    cpu.reset(&mut mmu);
     
     if !use_debug {
         'gameloop: loop {
-            cpu.run_for_scanline(&mut mem);
+            cpu.run_for_scanline(&mut mmu);
             cpu.tick_count -= TICKS_PER_SCANLINE;
-            let execute_interrupt = mem.ppu.render_scanline(&mut mem.mmu);
+            let execute_interrupt = mmu.ppu.render_scanline();
             if execute_interrupt {
                 let pc = cpu.pc;
-                cpu.push_u16(&mut mem, pc);
-                cpu.push_status(&mut mem);
-                cpu.pc = mem.mmu.read_u16(&mut mem.ppu, 0xfffa);
+                cpu.push_u16(&mut mmu, pc);
+                cpu.push_status(&mut mmu);
+                cpu.pc = mmu.read_u16(0xfffa);
             }
             
-            if mem.mmu.cart.mapper == 4 {
-                tick_timer(&mut cpu, &mut mem);
+            if mmu.ppu.mapper == 4 {
+                tick_timer(&mut cpu, &mut mmu);
             }
 
-            if mem.ppu.current_scanline == 240 {
-                let exiting = draw_frame_and_pump_events(&mut mem, &mut renderer, &mut texture, &mut event_pump);
+            if mmu.ppu.current_scanline == 240 {
+                let exiting = draw_frame_and_pump_events(&mut mmu, &mut renderer, &mut texture, &mut event_pump);
                 if exiting { break 'gameloop }
                 curr_timer_ticks = timer.ticks();
                 if (curr_timer_ticks - prev_timer_ticks) < TIMER_TICKS_PER_FRAME {
@@ -453,7 +378,7 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
         let mut cond_met;
         'gameloop_debug: loop {
             if show_cpu {
-                cpu.fetch(&mut mem);
+                cpu.fetch(&mut mmu);
                 debug_info = format!("[{:?}]", cpu);
             }
             else {
@@ -461,7 +386,7 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
             }
             
             if show_mem {
-                print_addr(&mut mem, cpu.pc, cpu.pc + cmp::min(5, 0xffff - cpu.pc));
+                print_addr(&mut mmu, cpu.pc, cpu.pc + cmp::min(5, 0xffff - cpu.pc));
             }
             
             let command = try!(prompt(prev_command, &debug_info));
@@ -469,35 +394,35 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
             match command {
                 DebuggerCommand::Quit => break,
                 DebuggerCommand::Nop => {},
-                DebuggerCommand::Ppm => try!(output_ppm(&mem.ppu, frame_count)),
-                DebuggerCommand::ShowPpu => println!("{:?}", mem.ppu),
+                DebuggerCommand::Ppm => try!(output_ppm(&mmu.ppu, frame_count)),
+                DebuggerCommand::ShowPpu => println!("{:?}", mmu.ppu),
                 DebuggerCommand::ToggleShowCpu => show_cpu = !show_cpu,
                 DebuggerCommand::ToggleShowMem => show_mem = !show_mem,
-                DebuggerCommand::PrintAddr(addr1, addr2) => print_addr(&mut mem, addr1, addr2),
-                DebuggerCommand::PrintPpuAddr(addr1, addr2) => print_ppu_addr(&mut mem, addr1, addr2),
+                DebuggerCommand::PrintAddr(addr1, addr2) => print_addr(&mut mmu, addr1, addr2),
+                DebuggerCommand::PrintPpuAddr(addr1, addr2) => print_ppu_addr(&mut mmu, addr1, addr2),
                 DebuggerCommand::ToggleDebug => cpu.is_debugging = !cpu.is_debugging,
                 DebuggerCommand::RunCpuUntil(cond) => {
                     cond_met = false;
                     while !cond_met {
-                        cond_met = cpu.run_until_condition(&mut mem, &cond);
+                        cond_met = cpu.run_until_condition(&mut mmu, &cond);
                         
                         if cpu.tick_count >= TICKS_PER_SCANLINE {
                             cpu.tick_count -= TICKS_PER_SCANLINE;
                             
-                            let execute_interrupt = mem.ppu.render_scanline(&mut mem.mmu);
+                            let execute_interrupt = mmu.ppu.render_scanline();
                             if execute_interrupt {
                                 let pc = cpu.pc;
-                                cpu.push_u16(&mut mem, pc);
-                                cpu.push_status(&mut mem);
-                                cpu.pc = mem.mmu.read_u16(&mut mem.ppu, 0xfffa);
+                                cpu.push_u16(&mut mmu, pc);
+                                cpu.push_status(&mut mmu);
+                                cpu.pc = mmu.read_u16(0xfffa);
                             }
 
-                            if mem.mmu.cart.mapper == 4 {
-                                tick_timer(&mut cpu, &mut mem);
+                            if mmu.ppu.mapper == 4 {
+                                tick_timer(&mut cpu, &mut mmu);
                             }
                             
-                            if mem.ppu.current_scanline == 240 {
-                                let exiting = draw_frame_and_pump_events(&mut mem, &mut renderer, &mut texture, &mut event_pump);
+                            if mmu.ppu.current_scanline == 240 {
+                                let exiting = draw_frame_and_pump_events(&mut mmu, &mut renderer, &mut texture, &mut event_pump);
                                 if exiting { break 'gameloop_debug }
                                 
                                 curr_timer_ticks = timer.ticks();
