@@ -331,6 +331,8 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
     const TIMER_TICKS_PER_FRAME : u32 = 1000 / 60;
     
     let mut mmu = Mmu::new();
+
+    //Load the cart contents into the MMU and PPU
     try!(load_cart(fname, &mut mmu));
 
     let mut cpu = Cpu::new();
@@ -442,6 +444,14 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
                     }
                 }
             }
+        }
+    }
+
+    if mmu.save_ram_present {
+        let mut out_save_file = File::create(mmu.save_ram_file_name);
+        match out_save_file {
+            Ok(ref mut f) => match f.write(&mmu.save_ram[..]) {_ => {}},
+            _ => {}
         }
     }
             

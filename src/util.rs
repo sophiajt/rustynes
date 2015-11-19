@@ -56,3 +56,25 @@ impl BitReader for File {
     }    
 }
 
+pub trait Joiner {
+    fn join(&self, c: char) -> String;
+}
+
+impl<'a> Joiner for Vec<&'a str> {
+    fn join(&self, c: char) -> String {
+        let mut result = String::new();
+        let mut first = true;
+        for &item in self {
+            if !first {
+                result.push(c);
+                result = result + item;
+            }
+            else {
+                result = result + item;
+                first = false;
+            }
+        }
+
+        result
+    }
+}

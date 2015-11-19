@@ -1,7 +1,7 @@
 use std::io;
 use std::io::prelude::*;
 use std::fs::File;
-use util::BitReader;
+use util::{BitReader, Joiner};
 use mmu::Mmu;
 use ppu::mirroring;
 
@@ -136,6 +136,29 @@ pub fn load_cart(fname: &String, mmu: &mut Mmu) -> Result<(), io::Error> {
 
     mmu.setup_defaults();
     configure_ppu_for_cart(mmu);
+
+    if save_ram_present {
+        let mut fname_split: Vec<&str> = fname.split('.').collect();
+        let save_file_name = 
+            match fname_split.last() {
+                Some(&"nes") => {fname_split.pop(); fname_split.push("sav"); fname_split.join('.')},
+                _ => {fname_split.push("sav"); fname_split.join('.')}
+            };
+
+        let mut save_file_open = File::open(save_file_name.clone());
+        match save_file_open {
+            Ok(ref mut save_file) => {
+                let mut buff = [0; 0x2000];
+                let result = save_file.read(&mut buff);
+                match result {
+                    Ok(_) => mmu.save_ram = buff.iter().cloned().collect(),
+                    _ => {}
+                }
+            },
+            _ => {}
+        }
+        mmu.save_ram_file_name = save_file_name;
+    }
 
     /*
     println!("Prg roms: {}", num_prg_pages * 4);

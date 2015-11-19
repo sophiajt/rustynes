@@ -4,12 +4,12 @@ use joypad::Joypad;
 pub struct Mmu {
     active_prg_page: Vec<usize>,
     scratch_ram: Vec<u8>,
-    save_ram: Vec<u8>,
+    pub save_ram: Vec<u8>,
     is_save_ram_readonly: bool,
     
-    //Mapper-specific registers
+    // Mapper-specific registers
 
-    //Mapper 1
+    // Mapper 1
     map1_reg_8000_bit: usize,
     map1_reg_a000_bit: usize,
     map1_reg_c000_bit: usize,
@@ -25,7 +25,7 @@ pub struct Mmu {
     map1_prg_switch_size: u8,
     map1_vrom_switch_size: u8,
 
-    //Mapper 4
+    // Mapper 4
     pub map4_command_number: u8,
     pub map4_prg_addr_select: u8,
     pub map4_chr_addr_select: u8,
@@ -39,6 +39,9 @@ pub struct Mmu {
     pub prg_rom : Vec<Vec<u8>>,
     pub save_ram_present: bool,
     pub num_prg_pages: usize,
+
+    // Save ram-specific
+    pub save_ram_file_name: String,
 
     // Subsystems    
     pub joypad: Joypad,
@@ -89,6 +92,7 @@ impl Mmu {
             prg_rom : Vec::new(),
             save_ram_present: false,
             num_prg_pages: 0,
+            save_ram_file_name: String::new(),
 
             joypad: Joypad::new(),
             ppu: Ppu::new()
