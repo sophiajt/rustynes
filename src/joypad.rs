@@ -24,9 +24,9 @@ impl Joypad {
                 3 => self.keys.contains(&Keycode::A),  // Select
                 4 => self.keys.contains(&Keycode::S),  // Start
                 5 => self.keys.contains(&Keycode::Up),
-                6 => self.keys.contains(&Keycode::Down),
+                6 => self.keys.contains(&Keycode::Down) && !self.keys.contains(&Keycode::Up),
                 7 => self.keys.contains(&Keycode::Left),
-                8 => self.keys.contains(&Keycode::Right),                
+                8 => self.keys.contains(&Keycode::Right) && !self.keys.contains(&Keycode::Left),                
                 _ => false
             };
         self.joypad_1_read_ptr += 1;
