@@ -1,28 +1,16 @@
-use sdl2;
-use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
-use sdl2::pixels::PixelFormatEnum;
-use sdl2::rect::Rect;
-use sdl2::render::TextureAccess;
-
 use crossterm::{cursor, terminal, AsyncReader, Attribute, Color, Colored};
 use std::error::Error;
 use std::f32;
 
 use crossterm::{Crossterm, InputEvent, KeyEvent, RawScreen};
 
+use crate::joypad::JoyButton;
 use std::fs::File;
-use std::io;
 use std::io::prelude::*;
-use std::thread::sleep;
 
 use crate::cart::load_cart;
-use crate::cpu::{BreakCondition, Cpu};
+use crate::cpu::Cpu;
 use crate::mmu::Mmu;
-use crate::ppu::Ppu;
-
-const VISIBLE_WIDTH: u32 = 256;
-const VISIBLE_HEIGHT: u32 = 240;
 
 pub const TICKS_PER_SCANLINE: u32 = 113;
 
@@ -116,7 +104,7 @@ impl Context {
 
         Ok(())
     }
-    pub fn update(&mut self) -> Result<(), Box<Error>> {
+    pub fn update(&mut self) -> Result<(), Box<dyn Error>> {
         let terminal = terminal();
         let terminal_size = terminal.terminal_size();
 
@@ -140,9 +128,8 @@ fn draw_frame_and_pump_events(
     mmu: &mut Mmu,
     stdin: &mut AsyncReader,
     context: &mut Context,
-) -> Result<bool, Box<std::error::Error>> {
-    //context.update(size, &mesh_queue)?; // This checks for if there needs to be a context update
-    context.update();
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let _ = context.update();
     context.clear(); // This clears the z and frame buffer
 
     let col_mult: f32 = 256.0 / context.width as f32;
@@ -150,9 +137,12 @@ fn draw_frame_and_pump_events(
 
     for row in 0..context.height {
         for col in 0..(context.width) {
+            let mut avg_pixel = 0;
+            let mut on_pixel = 0;
+            let mut off_pixel = 0;
+
             let pixel = mmu.ppu.offscreen_buffer
-                [((row_mult * row as f32) as usize * 256 + (col as f32 * col_mult) as usize)];
-            //let offset = row * pitch * 2 + col * 3 * 2;
+                [(((row_mult * row as f32) as usize) * 256 + (col as f32 * col_mult) as usize)];
 
             let red = (pixel >> 16) as u8;
             let green = ((pixel >> 8) & 0xff) as u8;
@@ -168,120 +158,32 @@ fn draw_frame_and_pump_events(
 
     //println!("context.size: {:?}", context.console_size);
     context.flush()?; // This prints all framebuffer info (good for changing colors ;)
+    let mut buttons: Vec<JoyButton> = vec![];
 
-    if let Some(b) = stdin.next() {
+    while let Some(b) = stdin.next() {
         match b {
             InputEvent::Keyboard(event) => match event {
                 KeyEvent::Char('q') => return Ok(true),
+                KeyEvent::Up => buttons.push(JoyButton::Up),
+                KeyEvent::Down => buttons.push(JoyButton::Down),
+                KeyEvent::Left => buttons.push(JoyButton::Left),
+                KeyEvent::Right => buttons.push(JoyButton::Right),
+                KeyEvent::Char('z') => buttons.push(JoyButton::A),
+                KeyEvent::Char('x') => buttons.push(JoyButton::B),
+                KeyEvent::Char('a') => buttons.push(JoyButton::Select),
+                KeyEvent::Char('s') => buttons.push(JoyButton::Start),
                 _ => {}
             },
             _ => {}
         }
     }
+    mmu.joypad.update_keys(buttons);
 
     Ok(false)
 }
-/*
-fn draw_frame_and_pump_events(
-    mmu: &mut Mmu,
-    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
-    texture: &mut sdl2::render::Texture,
-    event_pump: &mut sdl2::EventPump,
-) -> bool {
-    texture
-        .with_lock(None, |buffer: &mut [u8], pitch: usize| {
-            for row in 0..(VISIBLE_HEIGHT as usize) {
-                for col in 0..(VISIBLE_WIDTH as usize) {
-                    let pixel = mmu.ppu.offscreen_buffer[row * 256 + col];
-                    let offset = row * pitch * 2 + col * 3 * 2;
 
-                    let red = (pixel >> 16) as u8;
-                    let green = ((pixel >> 8) & 0xff) as u8;
-                    let blue = (pixel & 0xff) as u8;
-
-                    buffer[offset + 0] = red;
-                    buffer[offset + 3] = red;
-                    buffer[offset + pitch] = red;
-                    buffer[offset + pitch + 3] = red;
-                    buffer[offset + 1] = green;
-                    buffer[offset + 4] = green;
-                    buffer[offset + pitch + 1] = green;
-                    buffer[offset + pitch + 4] = green;
-                    buffer[offset + 2] = blue;
-                    buffer[offset + 5] = blue;
-                    buffer[offset + pitch + 2] = blue;
-                    buffer[offset + pitch + 5] = blue;
-                }
-            }
-        })
-        .unwrap();
-
-    canvas.clear();
-    let _ = canvas.copy(
-        &texture,
-        None,
-        Some(Rect::new(0, 0, VISIBLE_WIDTH * 2, VISIBLE_HEIGHT * 2)),
-    );
-
-    canvas.present();
-
-    for event in event_pump.poll_iter() {
-        match event {
-            Event::Quit { .. }
-            | Event::KeyDown {
-                keycode: Some(Keycode::Escape),
-                ..
-            } => return true,
-            _ => (),
-        }
-    }
-
-    let keys = event_pump
-        .keyboard_state()
-        .pressed_scancodes()
-        .filter_map(Keycode::from_scancode)
-        .collect();
-
-    mmu.joypad.update_keys(keys);
-
-    false
-}
-*/
-
-pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), Box<std::error::Error>> {
-    use std::cmp;
-
-    /*
-    let sdl_context = sdl2::init().unwrap();
-    let video_subsystem = sdl_context.video().unwrap();
-
-    let window = video_subsystem
-        .window("rustynes", VISIBLE_WIDTH * 2, VISIBLE_HEIGHT * 2)
-        .position_centered()
-        .opengl()
-        .build()
-        .unwrap();
-
-    let mut canvas = window.into_canvas().build().unwrap();
-    let texture_creator = canvas.texture_creator();
-    let mut texture = texture_creator
-        .create_texture(
-            PixelFormatEnum::RGB24,
-            TextureAccess::Streaming,
-            VISIBLE_WIDTH * 2,
-            VISIBLE_HEIGHT * 2,
-        )
-        .unwrap();
-
-    let mut event_pump = sdl_context.event_pump().unwrap();
-    let mut timer = sdl_context.timer().unwrap();
-
-    let mut prev_timer_ticks: u64 = timer.ticks() as u64;
-    let mut curr_timer_ticks: u64;
-    const TIMER_TICKS_PER_FRAME: u64 = 1000 / 60;
-    */
+pub fn run_cart(fname: &String) -> Result<(), Box<dyn std::error::Error>> {
     let mut context: Context = Context::blank(); // The context holds the frame+z buffer, and the width and height
-    let size: (u16, u16) = (0, 0); // This is the terminal size, it's used to check when a new context must be made
 
     let crossterm = Crossterm::new();
     #[allow(unused)]
@@ -298,7 +200,6 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), Box<std::error::E
     load_cart(fname, &mut mmu)?;
 
     let mut cpu = Cpu::new();
-    let mut frame_count = 0;
 
     //Create all our memory handlers, and hand off ownership
     //of the cart to contained mmu
@@ -326,23 +227,6 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), Box<std::error::E
             if exiting {
                 break 'gameloop;
             }
-            /*
-            let exiting =
-                draw_frame_and_pump_events(&mut mmu, &mut canvas, &mut texture, &mut event_pump);
-            if exiting {
-                break 'gameloop;
-            }
-            */
-            /*
-            curr_timer_ticks = timer.ticks() as u64;
-            if (curr_timer_ticks - prev_timer_ticks) < TIMER_TICKS_PER_FRAME {
-                sleep(std::time::Duration::from_millis(
-                    TIMER_TICKS_PER_FRAME - (curr_timer_ticks - prev_timer_ticks),
-                ));
-            }
-            prev_timer_ticks = curr_timer_ticks;
-            */
-            frame_count += 1;
         }
     }
     if mmu.save_ram_present {

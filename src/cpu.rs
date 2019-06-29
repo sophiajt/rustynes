@@ -15,15 +15,6 @@ mod flag {
     pub const CARRY     : u8 = 0x01;
 }
 
-#[derive(Clone)]
-pub enum BreakCondition {
-    RunToPc(u16),
-    RunNext,
-    RunToScanline,
-    RunFrame,
-    RunUntilFrame(usize)
-}
-
 pub struct Cpu {
     //registers
     a: u8,
@@ -54,8 +45,8 @@ impl fmt::Debug for Cpu {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{6:04x}:{0}[{1:02x}] a:{2:02x} x:{3:02x} y:{4:02x} sp:{5:02x} flags:{7}{8}{9}{10}{11}{12} tick: {13}", 
             self.show_opcode(), self.current_opcode,
-            self.a, self.x, self.y, self.sp, self.pc, 
-            if self.sign {'N'} else {'-'}, if self.zero { 'Z' } else {'-'}, if self.carry { 'C' } else {'-'}, 
+            self.a, self.x, self.y, self.sp, self.pc,
+            if self.sign {'N'} else {'-'}, if self.zero { 'Z' } else {'-'}, if self.carry { 'C' } else {'-'},
             if self.interrupt {'I'} else {'-'}, if self.decimal {'D'} else {'-'}, if self.overflow {'V'} else {'-'},
             self.tick_count)
         /*
@@ -1372,7 +1363,8 @@ impl Cpu {
             0xc6 => "dec", 
             0xc8 => "iny", 
             0xc9 => "cmp", 
-            0xca => "dex", 
+            0xca => "dex",
+            0xcb => "axs",
             0xcc => "cpy", 
             0xcd => "cmp", 
             0xce => "dec", 
@@ -1581,38 +1573,5 @@ impl Cpu {
             self.execute(mmu);
             if self.tick_count > TICKS_PER_SCANLINE { break; }
         }
-    }
-    
-    pub fn run_until_condition(&mut self, mmu: &mut Mmu, break_cond: &BreakCondition) -> bool {
-        let starting_tick_count = self.tick_count;
-        
-        while self.tick_count <= TICKS_PER_SCANLINE {
-            self.fetch(mmu);
-            if self.is_debugging {
-                //Print out each step, assuming we're not taking a step (as that will already be visible)
-                match break_cond {
-                     &BreakCondition::RunNext => {},
-                     _ => println!("{:?}", self)
-                }
-            }                        
-            self.execute(mmu);
-            match break_cond {
-                &BreakCondition::RunToPc(pc)   => if self.pc == pc { return true; },
-                &BreakCondition::RunNext       => if self.tick_count != starting_tick_count { return true; },
-                &BreakCondition::RunToScanline => if self.tick_count >= TICKS_PER_SCANLINE { return true; },
-                &BreakCondition::RunFrame |
-                &BreakCondition::RunUntilFrame(_) => {}
-            }
-        }
-        
-        false
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn bcc() {
-       assert!(true); 
     }
 }
