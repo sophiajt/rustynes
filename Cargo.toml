@@ -3,4 +3,4 @@ name = "rustynes"
 version = "0.1.0"
 
 [dependencies]
-sdl2 = "0.10"
+sdl2 = "0.32.2"

@@ -1,19 +1,20 @@
 use sdl2;
-use sdl2::pixels::PixelFormatEnum;
-use sdl2::rect::Rect;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
+use sdl2::pixels::PixelFormatEnum;
+use sdl2::rect::Rect;
+use sdl2::render::TextureAccess;
 
-use std::io;
-use std::io::Error;
-use std::io::prelude::*;
 use std::fs::File;
-use std::thread::sleep_ms;
+use std::io;
+use std::io::prelude::*;
+use std::io::Error;
+use std::thread::sleep;
 
-use cpu::{Cpu, BreakCondition};
 use cart::load_cart;
-use ppu::Ppu;
+use cpu::{BreakCondition, Cpu};
 use mmu::Mmu;
+use ppu::Ppu;
 
 const VISIBLE_WIDTH: u32 = 256;
 const VISIBLE_HEIGHT: u32 = 240;
@@ -29,18 +30,17 @@ enum DebuggerCommand {
     PrintPpuAddr(u16, u16),
     Nop,
     Ppm,
-    Quit
+    Quit,
 }
 
-pub const TICKS_PER_SCANLINE : u32 = 113;
+pub const TICKS_PER_SCANLINE: u32 = 113;
 
 pub fn tick_timer(cpu: &mut Cpu, mmu: &mut Mmu) {
     if mmu.ppu.current_scanline < 240 {
         if mmu.timer_reload_next && mmu.timer_irq_enabled {
             mmu.timer_irq_count = mmu.timer_irq_reload;
             mmu.timer_reload_next = false;
-        }
-        else {
+        } else {
             if mmu.timer_irq_enabled {
                 if mmu.timer_irq_count == 0 {
                     if mmu.timer_irq_reload > 0 {
@@ -50,8 +50,7 @@ pub fn tick_timer(cpu: &mut Cpu, mmu: &mut Mmu) {
                         cpu.pc = mmu.read_u16(0xfffe);
                         cpu.interrupt = true;
                         mmu.timer_irq_enabled = false;
-                    }
-                    else if mmu.timer_zero_pulse {
+                    } else if mmu.timer_zero_pulse {
                         let pc = cpu.pc;
                         cpu.push_u16(mmu, pc);
                         cpu.push_status(mmu);
@@ -60,8 +59,7 @@ pub fn tick_timer(cpu: &mut Cpu, mmu: &mut Mmu) {
                         mmu.timer_zero_pulse = false;
                     }
                     mmu.timer_reload_next = true;
-                }
-                else {
+                } else {
                     if mmu.ppu.background_visible || mmu.ppu.sprites_visible {
                         mmu.timer_irq_count -= 1;
                     }
@@ -73,39 +71,45 @@ pub fn tick_timer(cpu: &mut Cpu, mmu: &mut Mmu) {
 
 pub fn output_ppm(ppu: &Ppu, frame: usize) -> Result<(), io::Error> {
     let fname = format!("screens\\outputfile_{}.ppm", frame);
-    let mut f = try!(File::create(fname));
+    let mut f = File::create(fname)?;
 
-    try!(write!(f, "P3\n"));
-    try!(write!(f, "256 240\n"));
-    try!(write!(f, "255\n"));
-    
+    write!(f, "P3\n")?;
+    write!(f, "256 240\n")?;
+    write!(f, "255\n")?;
+
     for row in 0..240 {
         for col in 0..256 {
             let pixel = ppu.offscreen_buffer[row * 256 + col];
-            
-            try!(write!(f, "{} {} {} ", pixel >> 16, (pixel >> 8) & 0xff, pixel & 0xff));
+
+            write!(
+                f,
+                "{} {} {} ",
+                pixel >> 16,
+                (pixel >> 8) & 0xff,
+                pixel & 0xff
+            )?;
         }
-        try!(write!(f, "\n"));
+        write!(f, "\n")?;
     }
-    
+
     Ok(())
 }
 
 fn prompt(prev_command: DebuggerCommand, info: &String) -> Result<DebuggerCommand, io::Error> {
     loop {
         print!("{}> ", info);
-        try!(io::stdout().flush());
-        
+        io::stdout().flush()?;
+
         let mut buffer = String::new();
-        try!(io::stdin().read_line(&mut buffer));
-        
+        io::stdin().read_line(&mut buffer)?;
+
         for line in buffer.lines() {
-            let parts : Vec<&str> = line.split_whitespace().collect();
-            
+            let parts: Vec<&str> = line.split_whitespace().collect();
+
             if parts.len() == 0 {
                 return Ok(prev_command);
             }
-            
+
             match parts[0] {
                 "quit" | "q" => return Ok(DebuggerCommand::Quit),
                 "cpu" => return Ok(DebuggerCommand::ToggleShowCpu),
@@ -116,79 +120,87 @@ fn prompt(prev_command: DebuggerCommand, info: &String) -> Result<DebuggerComman
                 "frame" | "fr" => {
                     if parts.len() == 1 {
                         return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunFrame));
-                    }
-                    else {
+                    } else {
                         let toframe = parts[1];
                         match usize::from_str_radix(toframe, 10) {
-                            Ok(val) => return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunUntilFrame(val))),
-                            _ => println!("Supply a frame to break on. Eg: frame 100")
+                            Ok(val) => {
+                                return Ok(DebuggerCommand::RunCpuUntil(
+                                    BreakCondition::RunUntilFrame(val),
+                                ))
+                            }
+                            _ => println!("Supply a frame to break on. Eg: frame 100"),
                         }
                     }
-                },
+                }
                 "sl" => return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunToScanline)),
                 "next" | "n" => return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunNext)),
                 "break" | "br" => {
-                        if parts.len() < 2 {
-                            println!("Supply a PC to break on. Eg: break fffc");
-                        }
-                        else {
-                            let pc = parts[1];
-                            match u16::from_str_radix(pc, 16) {
-                                Ok(val) => return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunToPc(val))),
-                                _ => println!("Supply a PC to break on. Eg: break fffc")
+                    if parts.len() < 2 {
+                        println!("Supply a PC to break on. Eg: break fffc");
+                    } else {
+                        let pc = parts[1];
+                        match u16::from_str_radix(pc, 16) {
+                            Ok(val) => {
+                                return Ok(DebuggerCommand::RunCpuUntil(BreakCondition::RunToPc(
+                                    val,
+                                )))
                             }
+                            _ => println!("Supply a PC to break on. Eg: break fffc"),
                         }
-                    },
+                    }
+                }
                 "print" | "p" => {
-                        if parts.len() < 2 {
-                            println!("Supply an address to show. Eg: print fffc");
-                        }
-                        else {
-                            let start = parts[1];
-                            match u16::from_str_radix(start, 16) {
-                                Ok(val) => {
-                                    if parts.len() == 3 {
-                                        match u16::from_str_radix(parts[2], 16) {
-                                            Ok(val2) => return Ok(DebuggerCommand::PrintAddr(val, val2)),
-                                            _ => println!("Supply an end address to show. Eg: print fffc fffe")
+                    if parts.len() < 2 {
+                        println!("Supply an address to show. Eg: print fffc");
+                    } else {
+                        let start = parts[1];
+                        match u16::from_str_radix(start, 16) {
+                            Ok(val) => {
+                                if parts.len() == 3 {
+                                    match u16::from_str_radix(parts[2], 16) {
+                                        Ok(val2) => {
+                                            return Ok(DebuggerCommand::PrintAddr(val, val2))
                                         }
+                                        _ => println!(
+                                            "Supply an end address to show. Eg: print fffc fffe"
+                                        ),
                                     }
-                                    else if parts.len() == 2 {
-                                        return Ok(DebuggerCommand::PrintAddr(val, val));                                    
-                                    }
-                                    else {
-                                        println!("Too many arguments to print command");
-                                    }
-                                },
-                                _ => println!("Supply an address to show. Eg: print fffc")
-                            }                            
+                                } else if parts.len() == 2 {
+                                    return Ok(DebuggerCommand::PrintAddr(val, val));
+                                } else {
+                                    println!("Too many arguments to print command");
+                                }
+                            }
+                            _ => println!("Supply an address to show. Eg: print fffc"),
                         }
-                    },
+                    }
+                }
                 "printppu" | "pp" => {
-                        if parts.len() < 2 {
-                            println!("Supply an address to show. Eg: print fffc");
-                        }
-                        else {
-                            let start = parts[1];
-                            match u16::from_str_radix(start, 16) {
-                                Ok(val) => {
-                                    if parts.len() == 3 {
-                                        match u16::from_str_radix(parts[2], 16) {
-                                            Ok(val2) => return Ok(DebuggerCommand::PrintPpuAddr(val, val2)),
-                                            _ => println!("Supply an end address to show. Eg: print fffc fffe")
+                    if parts.len() < 2 {
+                        println!("Supply an address to show. Eg: print fffc");
+                    } else {
+                        let start = parts[1];
+                        match u16::from_str_radix(start, 16) {
+                            Ok(val) => {
+                                if parts.len() == 3 {
+                                    match u16::from_str_radix(parts[2], 16) {
+                                        Ok(val2) => {
+                                            return Ok(DebuggerCommand::PrintPpuAddr(val, val2))
                                         }
+                                        _ => println!(
+                                            "Supply an end address to show. Eg: print fffc fffe"
+                                        ),
                                     }
-                                    else if parts.len() == 2 {
-                                        return Ok(DebuggerCommand::PrintPpuAddr(val, val));                                    
-                                    }
-                                    else {
-                                        println!("Too many arguments to print command");
-                                    }
-                                },
-                                _ => println!("Supply an address to show. Eg: print fffc")
-                            }                            
+                                } else if parts.len() == 2 {
+                                    return Ok(DebuggerCommand::PrintPpuAddr(val, val));
+                                } else {
+                                    println!("Too many arguments to print command");
+                                }
+                            }
+                            _ => println!("Supply an address to show. Eg: print fffc"),
                         }
-                    },
+                    }
+                }
                 "help" | "h" => {
                     println!("Commands available:");
                     println!("  q(uit): leave debugger");
@@ -203,8 +215,8 @@ fn prompt(prev_command: DebuggerCommand, info: &String) -> Result<DebuggerComman
                     println!("  p(rint) <addr> (<end addr>): show memory at addr");
                     println!("  pp <addr> (<end addr>): show ppu memory at addr");
                     println!("  ppm: save ppm of current video frame to 'screens'");
-                },
-                _ => println!("Use 'help' to see commands")
+                }
+                _ => println!("Use 'help' to see commands"),
             }
         }
     }
@@ -212,19 +224,19 @@ fn prompt(prev_command: DebuggerCommand, info: &String) -> Result<DebuggerComman
 
 fn print_addr(mmu: &mut Mmu, addr1: u16, addr2: u16) {
     let mut idx = 0;
-    
+
     loop {
         if idx % 16 == 0 {
             print!("{0:04x}: ", addr1 + idx);
         }
         print!("{0:02x} ", mmu.read_u8(addr1 + idx));
-        
+
         if (addr1 + idx) == addr2 {
             break;
         }
-        
+
         idx += 1;
-        
+
         if (idx % 16) == 0 {
             println!("");
         }
@@ -234,23 +246,28 @@ fn print_addr(mmu: &mut Mmu, addr1: u16, addr2: u16) {
 
 fn print_ppu_addr(mmu: &mut Mmu, addr1: u16, addr2: u16) {
     let mut idx = 0;
-    
+
     loop {
         if idx % 16 == 0 {
             print!("{0:04x}: ", addr1 + idx);
         }
         if ((addr1 + idx) >= 0x2000) && ((addr1 + idx) < 0x4000) {
-            print!("{0:02x} ", mmu.ppu.name_tables[(addr1 as usize) - 0x2000 + (idx as usize)]);
-        }
-        else if (addr1 + idx) < 0x2000 {
-            print!("{0:02x} ", mmu.ppu.read_chr_rom((addr1 as usize) + (idx as usize)));
+            print!(
+                "{0:02x} ",
+                mmu.ppu.name_tables[(addr1 as usize) - 0x2000 + (idx as usize)]
+            );
+        } else if (addr1 + idx) < 0x2000 {
+            print!(
+                "{0:02x} ",
+                mmu.ppu.read_chr_rom((addr1 as usize) + (idx as usize))
+            );
         }
         if (addr1 + idx) == addr2 {
             break;
         }
-        
+
         idx += 1;
-        
+
         if (idx % 16) == 0 {
             println!("");
         }
@@ -258,95 +275,119 @@ fn print_ppu_addr(mmu: &mut Mmu, addr1: u16, addr2: u16) {
     println!("");
 }
 
-fn draw_frame_and_pump_events(mmu: &mut Mmu, renderer: &mut sdl2::render::Renderer, texture: &mut sdl2::render::Texture,
-    event_pump: &mut sdl2::EventPump) -> bool {
-    
-    texture.with_lock(None, |buffer: &mut [u8], pitch: usize| {
-        for row in 0..(VISIBLE_HEIGHT as usize) {
-            for col in 0..(VISIBLE_WIDTH as usize) {
-                let pixel = mmu.ppu.offscreen_buffer[row * 256 + col];
-                let offset = row*pitch*2 + col*3*2;
+fn draw_frame_and_pump_events(
+    mmu: &mut Mmu,
+    canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
+    texture: &mut sdl2::render::Texture,
+    event_pump: &mut sdl2::EventPump,
+) -> bool {
+    texture
+        .with_lock(None, |buffer: &mut [u8], pitch: usize| {
+            for row in 0..(VISIBLE_HEIGHT as usize) {
+                for col in 0..(VISIBLE_WIDTH as usize) {
+                    let pixel = mmu.ppu.offscreen_buffer[row * 256 + col];
+                    let offset = row * pitch * 2 + col * 3 * 2;
 
-                let red = (pixel >> 16) as u8;
-                let green = ((pixel >> 8) & 0xff) as u8;
-                let blue = (pixel & 0xff) as u8;
+                    let red = (pixel >> 16) as u8;
+                    let green = ((pixel >> 8) & 0xff) as u8;
+                    let blue = (pixel & 0xff) as u8;
 
-                buffer[offset + 0] = red;
-                buffer[offset + 3] = red;
-                buffer[offset + pitch] = red;
-                buffer[offset + pitch + 3] = red;
-                buffer[offset + 1] = green;
-                buffer[offset + 4] = green;
-                buffer[offset + pitch + 1] = green;
-                buffer[offset + pitch + 4] = green;
-                buffer[offset + 2] = blue;
-                buffer[offset + 5] = blue;
-                buffer[offset + pitch + 2] = blue;
-                buffer[offset + pitch + 5] = blue;
+                    buffer[offset + 0] = red;
+                    buffer[offset + 3] = red;
+                    buffer[offset + pitch] = red;
+                    buffer[offset + pitch + 3] = red;
+                    buffer[offset + 1] = green;
+                    buffer[offset + 4] = green;
+                    buffer[offset + pitch + 1] = green;
+                    buffer[offset + pitch + 4] = green;
+                    buffer[offset + 2] = blue;
+                    buffer[offset + 5] = blue;
+                    buffer[offset + pitch + 2] = blue;
+                    buffer[offset + pitch + 5] = blue;
+                }
             }
-        }
-    }).unwrap();
+        })
+        .unwrap();
 
-    renderer.clear();
-    renderer.copy(&texture, None, Some(Rect::new_unwrap(0, 0, VISIBLE_WIDTH * 2, VISIBLE_HEIGHT * 2)));
-    renderer.present();
-    
+    canvas.clear();
+    let _ = canvas.copy(
+        &texture,
+        None,
+        Some(Rect::new(0, 0, VISIBLE_WIDTH * 2, VISIBLE_HEIGHT * 2)),
+    );
+
+    canvas.present();
+
     for event in event_pump.poll_iter() {
         match event {
-            Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => 
-                return true,
-            _ => ()
+            Event::Quit { .. }
+            | Event::KeyDown {
+                keycode: Some(Keycode::Escape),
+                ..
+            } => return true,
+            _ => (),
         }
     }
-    
-    let keys = event_pump.keyboard_state().pressed_scancodes().
-        filter_map(Keycode::from_scancode).collect();
+
+    let keys = event_pump
+        .keyboard_state()
+        .pressed_scancodes()
+        .filter_map(Keycode::from_scancode)
+        .collect();
 
     mmu.joypad.update_keys(keys);
-    
+
     false
 }
 
 pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
     use std::cmp;
-    
+
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
 
-    let window = video_subsystem.window("rustynes", VISIBLE_WIDTH*2, VISIBLE_HEIGHT*2)
+    let window = video_subsystem
+        .window("rustynes", VISIBLE_WIDTH * 2, VISIBLE_HEIGHT * 2)
         .position_centered()
         .opengl()
         .build()
         .unwrap();
 
-    let mut renderer = window.renderer().build().unwrap();
+    let mut canvas = window.into_canvas().build().unwrap();
+    let texture_creator = canvas.texture_creator();
+    let mut texture = texture_creator
+        .create_texture(
+            PixelFormatEnum::RGB24,
+            TextureAccess::Streaming,
+            VISIBLE_WIDTH * 2,
+            VISIBLE_HEIGHT * 2,
+        )
+        .unwrap();
 
-    let mut texture = renderer.create_texture_streaming(PixelFormatEnum::RGB24, (VISIBLE_WIDTH * 2, VISIBLE_HEIGHT * 2)).unwrap();
-    
     let mut event_pump = sdl_context.event_pump().unwrap();
     let mut timer = sdl_context.timer().unwrap();
-    
-    let mut prev_timer_ticks : u32 = timer.ticks();
-    let mut curr_timer_ticks : u32;
-    const TIMER_TICKS_PER_FRAME : u32 = 1000 / 60;
-    
+
+    let mut prev_timer_ticks: u64 = timer.ticks() as u64;
+    let mut curr_timer_ticks: u64;
+    const TIMER_TICKS_PER_FRAME: u64 = 1000 / 60;
+
     let mut mmu = Mmu::new();
 
     //Load the cart contents into the MMU and PPU
-    try!(load_cart(fname, &mut mmu));
+    load_cart(fname, &mut mmu)?;
 
     let mut cpu = Cpu::new();
     let mut frame_count = 0;
-    let mut debug_info : String;
+    let mut debug_info: String;
     let mut show_cpu = true;
     let mut show_mem = false;
     let mut prev_command = DebuggerCommand::Nop;
 
     //Create all our memory handlers, and hand off ownership
     //of the cart to contained mmu
-    
+
     cpu.reset(&mut mmu);
-    
+
     if !use_debug {
         'gameloop: loop {
             cpu.run_for_scanline(&mut mmu);
@@ -358,59 +399,68 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
                 cpu.push_status(&mut mmu);
                 cpu.pc = mmu.read_u16(0xfffa);
             }
-            
+
             if mmu.ppu.mapper == 4 {
                 tick_timer(&mut cpu, &mut mmu);
             }
 
             if mmu.ppu.current_scanline == 240 {
-                let exiting = draw_frame_and_pump_events(&mut mmu, &mut renderer, &mut texture, &mut event_pump);
-                if exiting { break 'gameloop }
-                curr_timer_ticks = timer.ticks();
+                let exiting = draw_frame_and_pump_events(
+                    &mut mmu,
+                    &mut canvas,
+                    &mut texture,
+                    &mut event_pump,
+                );
+                if exiting {
+                    break 'gameloop;
+                }
+                curr_timer_ticks = timer.ticks() as u64;
                 if (curr_timer_ticks - prev_timer_ticks) < TIMER_TICKS_PER_FRAME {
-                    sleep_ms(TIMER_TICKS_PER_FRAME - (curr_timer_ticks - prev_timer_ticks));
+                    sleep(std::time::Duration::from_millis(
+                        TIMER_TICKS_PER_FRAME - (curr_timer_ticks - prev_timer_ticks),
+                    ));
                 }
                 prev_timer_ticks = curr_timer_ticks;
-    
+
                 frame_count += 1;
             }
         }
-    }
-    else {
+    } else {
         let mut cond_met;
         'gameloop_debug: loop {
             if show_cpu {
                 cpu.fetch(&mut mmu);
                 debug_info = format!("[{:?}]", cpu);
-            }
-            else {
+            } else {
                 debug_info = String::new();
             }
-            
+
             if show_mem {
                 print_addr(&mut mmu, cpu.pc, cpu.pc + cmp::min(5, 0xffff - cpu.pc));
             }
-            
-            let command = try!(prompt(prev_command, &debug_info));
+
+            let command = prompt(prev_command, &debug_info)?;
             prev_command = command.clone();
             match command {
                 DebuggerCommand::Quit => break,
-                DebuggerCommand::Nop => {},
-                DebuggerCommand::Ppm => try!(output_ppm(&mmu.ppu, frame_count)),
+                DebuggerCommand::Nop => {}
+                DebuggerCommand::Ppm => output_ppm(&mmu.ppu, frame_count)?,
                 DebuggerCommand::ShowPpu => println!("{:?}", mmu.ppu),
                 DebuggerCommand::ToggleShowCpu => show_cpu = !show_cpu,
                 DebuggerCommand::ToggleShowMem => show_mem = !show_mem,
                 DebuggerCommand::PrintAddr(addr1, addr2) => print_addr(&mut mmu, addr1, addr2),
-                DebuggerCommand::PrintPpuAddr(addr1, addr2) => print_ppu_addr(&mut mmu, addr1, addr2),
+                DebuggerCommand::PrintPpuAddr(addr1, addr2) => {
+                    print_ppu_addr(&mut mmu, addr1, addr2)
+                }
                 DebuggerCommand::ToggleDebug => cpu.is_debugging = !cpu.is_debugging,
                 DebuggerCommand::RunCpuUntil(cond) => {
                     cond_met = false;
                     while !cond_met {
                         cond_met = cpu.run_until_condition(&mut mmu, &cond);
-                        
+
                         if cpu.tick_count >= TICKS_PER_SCANLINE {
                             cpu.tick_count -= TICKS_PER_SCANLINE;
-                            
+
                             let execute_interrupt = mmu.ppu.render_scanline();
                             if execute_interrupt {
                                 let pc = cpu.pc;
@@ -422,23 +472,37 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
                             if mmu.ppu.mapper == 4 {
                                 tick_timer(&mut cpu, &mut mmu);
                             }
-                            
+
                             if mmu.ppu.current_scanline == 240 {
-                                let exiting = draw_frame_and_pump_events(&mut mmu, &mut renderer, &mut texture, &mut event_pump);
-                                if exiting { break 'gameloop_debug }
-                                
-                                curr_timer_ticks = timer.ticks();
+                                let exiting = draw_frame_and_pump_events(
+                                    &mut mmu,
+                                    &mut canvas,
+                                    &mut texture,
+                                    &mut event_pump,
+                                );
+                                if exiting {
+                                    break 'gameloop_debug;
+                                }
+
+                                curr_timer_ticks = timer.ticks() as u64;
                                 if (curr_timer_ticks - prev_timer_ticks) < TIMER_TICKS_PER_FRAME {
-                                    sleep_ms(TIMER_TICKS_PER_FRAME - (curr_timer_ticks - prev_timer_ticks));
+                                    sleep(std::time::Duration::from_millis(
+                                        TIMER_TICKS_PER_FRAME
+                                            - (curr_timer_ticks - prev_timer_ticks),
+                                    ));
                                 }
                                 prev_timer_ticks = curr_timer_ticks;
                                 frame_count += 1;
-    
+
                                 match cond {
                                     BreakCondition::RunFrame => cond_met = true,
-                                    BreakCondition::RunUntilFrame(f) => if frame_count == f { cond_met = true; },
+                                    BreakCondition::RunUntilFrame(f) => {
+                                        if frame_count == f {
+                                            cond_met = true;
+                                        }
+                                    }
                                     _ => {}
-                                }                            
+                                }
                             }
                         }
                     }
@@ -450,11 +514,12 @@ pub fn run_cart(fname: &String, use_debug: bool) -> Result<(), io::Error> {
     if mmu.save_ram_present {
         let mut out_save_file = File::create(mmu.save_ram_file_name);
         match out_save_file {
-            Ok(ref mut f) => match f.write(&mmu.save_ram[..]) {_ => {}},
+            Ok(ref mut f) => match f.write(&mmu.save_ram[..]) {
+                _ => {}
+            },
             _ => {}
         }
     }
-            
+
     Ok(())
 }
-
