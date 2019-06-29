@@ -8,13 +8,12 @@ use sdl2::render::TextureAccess;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
-use std::io::Error;
 use std::thread::sleep;
 
-use cart::load_cart;
-use cpu::{BreakCondition, Cpu};
-use mmu::Mmu;
-use ppu::Ppu;
+use crate::cart::load_cart;
+use crate::cpu::{BreakCondition, Cpu};
+use crate::mmu::Mmu;
+use crate::ppu::Ppu;
 
 const VISIBLE_WIDTH: u32 = 256;
 const VISIBLE_HEIGHT: u32 = 240;

@@ -1,5 +1,5 @@
-use joypad::Joypad;
-use ppu::{mirroring, Ppu};
+use crate::joypad::Joypad;
+use crate::ppu::{mirroring, Ppu};
 
 pub struct Mmu {
     active_prg_page: Vec<usize>,

@@ -2,8 +2,8 @@ use std::process;
 
 use std::fmt; //for custom Debug
 
-use nes::{TICKS_PER_SCANLINE};
-use mmu::Mmu;
+use crate::nes::{TICKS_PER_SCANLINE};
+use crate::mmu::Mmu;
 
 mod flag {
     pub const SIGN      : u8 = 0x80;
