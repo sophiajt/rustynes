@@ -53,6 +53,7 @@ pub struct Context {
     pub height: usize,
     pub frame_buffer: Vec<(char, (u8, u8, u8))>,
     pub z_buffer: Vec<f32>,
+    pub since_last_button: Vec<usize>,
 }
 
 impl Context {
@@ -63,6 +64,7 @@ impl Context {
             height: 0,
             frame_buffer: vec![],
             z_buffer: vec![],
+            since_last_button: vec![0; 8],
         }
     }
     pub fn clear(&mut self) {
@@ -132,21 +134,36 @@ fn draw_frame_and_pump_events(
     let _ = context.update();
     context.clear(); // This clears the z and frame buffer
 
-    let col_mult: f32 = 256.0 / context.width as f32;
-    let row_mult: f32 = 240.0 / context.height as f32;
-
-    for row in 0..context.height {
-        for col in 0..(context.width) {
-            let mut avg_pixel = 0;
-            let mut on_pixel = 0;
-            let mut off_pixel = 0;
-
-            let pixel = mmu.ppu.offscreen_buffer
-                [(((row_mult * row as f32) as usize) * 256 + (col as f32 * col_mult) as usize)];
+    let mut old_offscreen = vec![];
+    for row in 0..240 {
+        for col in 0..256 {
+            let pixel = mmu.ppu.offscreen_buffer[row * 256 + col];
 
             let red = (pixel >> 16) as u8;
             let green = ((pixel >> 8) & 0xff) as u8;
             let blue = (pixel & 0xff) as u8;
+            old_offscreen.push(red);
+            old_offscreen.push(green);
+            old_offscreen.push(blue);
+        }
+    }
+
+    let mut new_offscreen = vec![0; context.height * context.width * 3];
+    let mut resizer = resize::new(
+        256,
+        240,
+        context.width,
+        context.height,
+        resize::Pixel::RGB24,
+        resize::Type::Lanczos3,
+    );
+    resizer.resize(&old_offscreen, &mut new_offscreen);
+
+    for row in 0..context.height {
+        for col in 0..(context.width) {
+            let red = new_offscreen[col * 3 + row * context.width * 3];
+            let green = new_offscreen[col * 3 + 1 + row * context.width * 3];
+            let blue = new_offscreen[col * 3 + 2 + row * context.width * 3];
 
             context.frame_buffer[col + row * context.width] = ('@', (red, green, blue));
         }
@@ -164,19 +181,26 @@ fn draw_frame_and_pump_events(
         match b {
             InputEvent::Keyboard(event) => match event {
                 KeyEvent::Char('q') => return Ok(true),
-                KeyEvent::Up => buttons.push(JoyButton::Up),
-                KeyEvent::Down => buttons.push(JoyButton::Down),
-                KeyEvent::Left => buttons.push(JoyButton::Left),
-                KeyEvent::Right => buttons.push(JoyButton::Right),
-                KeyEvent::Char('z') => buttons.push(JoyButton::A),
-                KeyEvent::Char('x') => buttons.push(JoyButton::B),
-                KeyEvent::Char('a') => buttons.push(JoyButton::Select),
-                KeyEvent::Char('s') => buttons.push(JoyButton::Start),
+                KeyEvent::Up => context.since_last_button[JoyButton::Up as usize] = 0,
+                KeyEvent::Down => context.since_last_button[JoyButton::Down as usize] = 0,
+                KeyEvent::Left => context.since_last_button[JoyButton::Left as usize] = 0,
+                KeyEvent::Right => context.since_last_button[JoyButton::Right as usize] = 0,
+                KeyEvent::Char('z') => context.since_last_button[JoyButton::A as usize] = 0,
+                KeyEvent::Char('x') => context.since_last_button[JoyButton::B as usize] = 0,
+                KeyEvent::Char('a') => context.since_last_button[JoyButton::Select as usize] = 0,
+                KeyEvent::Char('s') => context.since_last_button[JoyButton::Start as usize] = 0,
                 _ => {}
             },
             _ => {}
         }
     }
+    for i in 0..8 {
+        if context.since_last_button[i] < 15 {
+            buttons.push(JoyButton::from_usize(i));
+            context.since_last_button[i] += 1;
+        }
+    }
+
     mmu.joypad.update_keys(buttons);
 
     Ok(false)

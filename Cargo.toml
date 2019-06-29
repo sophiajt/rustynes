@@ -6,3 +6,4 @@ edition = "2018"
 [dependencies]
 # sdl2 = "0.32.2"
 crossterm = "0.9.6"
+resize = "0.3.0"

@@ -1,14 +1,30 @@
 #[derive(PartialEq, Debug)]
 pub enum JoyButton {
-    Up,
-    Down,
-    Left,
-    Right,
-    A,
-    B,
-    Select,
-    Start,
+    Up = 0,
+    Down = 1,
+    Left = 2,
+    Right = 3,
+    A = 4,
+    B = 5,
+    Select = 6,
+    Start = 7,
 }
+
+impl JoyButton {
+    pub fn from_usize(x: usize) -> JoyButton {
+        match x {
+            0 => JoyButton::Up,
+            1 => JoyButton::Down,
+            2 => JoyButton::Left,
+            3 => JoyButton::Right,
+            4 => JoyButton::A,
+            5 => JoyButton::B,
+            6 => JoyButton::Select,
+            _ => JoyButton::Start,
+        }
+    }
+}
+
 pub struct Joypad {
     keys: Vec<JoyButton>,
     joypad_1_last_write: u8,
